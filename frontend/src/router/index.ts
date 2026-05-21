@@ -1,7 +1,8 @@
-import { createRouter, createWebHistory } from 'vue-router'
+import { createRouter, createWebHashHistory } from 'vue-router'
 
 const router = createRouter({
-  history: createWebHistory(),
+  // Hash history works when opening dist/index.html directly via file://
+  history: createWebHashHistory(),
   routes: [
     {
       path: '/',

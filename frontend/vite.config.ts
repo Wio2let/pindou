@@ -2,6 +2,8 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 
 export default defineConfig({
+  // Relative asset paths for offline file:// open
+  base: './',
   plugins: [vue()],
   server: {
     port: 5173,

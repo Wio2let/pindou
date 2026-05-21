@@ -19,6 +19,10 @@ data/exports/
 # Node
 frontend/node_modules/
 frontend/dist/
+!frontend/dist/.offline-pack
+!frontend/dist/index.html
+!frontend/dist/assets/
+!frontend/dist/assets/**
 
 # IDE
 .idea/
