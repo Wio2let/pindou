@@ -11,13 +11,14 @@ export interface PerlerGrid {
 }
 
 /** Pixelation algorithms. */
-export type ConvertAlgo = 'smooth' | 'avg' | 'sharp' | 'slic' | 'floyd' | 'atkinson' | 'bayer'
+export type ConvertAlgo = 'smooth' | 'avg' | 'sharp' | 'slic' | 'block' | 'floyd' | 'atkinson' | 'bayer'
 
 export const ALGO_OPTIONS: { id: ConvertAlgo; label: string; desc: string }[] = [
   { id: 'smooth',   label: '平滑取色',       desc: '双线性缩放后最近邻匹配，适合照片' },
   { id: 'avg',      label: '区域平均',        desc: '四倍中间帧降采样取均值，颜色过渡更柔和' },
   { id: 'sharp',    label: '锐利像素',        desc: '边缘保留降采样，线条与轮廓清晰不丢失，适合像素图/线稿/Logo' },
   { id: 'slic',     label: 'SLIC 像素',      desc: 'SLIC 超像素聚类，相似区域合并为干净色块，扁平像素画风' },
+  { id: 'block',    label: '色块归并',       desc: '邻域多数表决迭代，相邻像素尽量同色，合并成大块平整色区' },
   { id: 'floyd',    label: '抖动 · Floyd',   desc: 'Floyd-Steinberg 误差扩散，渐变更细腻' },
   { id: 'atkinson', label: '抖动 · Atkinson', desc: 'Atkinson 抖动，轮廓清晰，颗粒感弱' },
   { id: 'bayer',    label: '抖动 · Bayer',   desc: '有序抖动，规则颗粒感，复古风格' },
@@ -379,6 +380,65 @@ export function imageToGrid(
         : nearestColor(data[i * 4], data[i * 4 + 1], data[i * 4 + 2], palette, metric).code
     }
     return { width: w, height: h, cells }
+  }
+
+  // ---- block: region-coalescing majority filter ----
+  // Quantize, then iteratively set each cell to the most common color in its
+  // 3×3 neighbourhood. Adjacent cells converge to the same color, so the
+  // result is built from large, flat color patches.
+  if (algo === 'block') {
+    const cv = document.createElement('canvas')
+    cv.width = w
+    cv.height = h
+    const ctx = cv.getContext('2d', { willReadFrequently: true })!
+    ctx.imageSmoothingEnabled = true
+    ctx.imageSmoothingQuality = 'high'
+    ctx.clearRect(0, 0, w, h)
+    ctx.drawImage(img, 0, 0, w, h)
+    const data = ctx.getImageData(0, 0, w, h).data
+    const N = w * h
+
+    // initial quantization
+    let cur: (string | null)[] = new Array(N)
+    for (let i = 0; i < N; i++) {
+      if (data[i * 4 + 3] < 128) { cur[i] = null; continue }
+      cur[i] = nearestColor(data[i * 4], data[i * 4 + 1], data[i * 4 + 2], palette, metric).code
+    }
+
+    // iterative 3×3 majority vote — the center cell is weighted, so a cell
+    // only flips when a neighbouring color clearly dominates
+    for (let pass = 0; pass < 4; pass++) {
+      const next: (string | null)[] = new Array(N)
+      let changed = 0
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const i = y * w + x
+          const center = cur[i]
+          if (center === null) { next[i] = null; continue }
+          const tally = new Map<string, number>()
+          for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+              const nx = x + dx, ny = y + dy
+              if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue
+              const code = cur[ny * w + nx]
+              if (code === null) continue
+              const wgt = (dx === 0 && dy === 0) ? 2 : 1
+              tally.set(code, (tally.get(code) || 0) + wgt)
+            }
+          }
+          let best = center
+          let bestN = tally.get(center) || 0
+          for (const [code, n] of tally) {
+            if (n > bestN) { bestN = n; best = code }
+          }
+          next[i] = best
+          if (best !== center) changed++
+        }
+      }
+      cur = next
+      if (!changed) break
+    }
+    return { width: w, height: h, cells: cur }
   }
 
   // ---- all other algorithms: render to a single canvas ----

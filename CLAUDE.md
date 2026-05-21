@@ -49,10 +49,12 @@
 - `frontend/src/components/BeadPalettePicker.vue` — 自定义色板选择弹窗
   （全部色号方块、按 A/B/C… 系列分类、可勾选）。
 - `frontend/src/components/BeadExportDialog.vue` — 导出弹窗（只选格式，样式跟随画布）。
-- `frontend/src/composables/usePerler.ts` — 转换逻辑：7 种生成算法
-  (smooth/avg/sharp/slic/floyd/atkinson/bayer)、4 种平替算法 (lab/weighted/hue/luma)。
+- `frontend/src/composables/usePerler.ts` — 转换逻辑：8 种生成算法
+  (smooth/avg/sharp/slic/block/floyd/atkinson/bayer)、4 种平替算法
+  (lab/weighted/hue/luma)。
   `sharp` 为边缘保留降采样（高分辨率重采样 + 暗簇优先，保轮廓）；
   `slic` 为 SLIC 超像素聚类（CIELAB+xy 空间，相似区域合并为扁平色块）；
+  `block` 为色块归并（量化后 3×3 邻域多数表决迭代，相邻像素尽量同色）；
   `lab` 为默认平替：CIELAB ΔE94 感知匹配（渐变丝滑、惩罚去饱和避免混杂）。
 - `frontend/src/data/mardPalettes.ts` — **MARD 官方色卡数据（263 色）**。
   A~M 九系为标准盒、P/Q/R/T/Y 五系为追加色（共 14 系）。
@@ -63,7 +65,7 @@
   更新色卡只需整体替换本文件，其余功能按色号工作。
 - `frontend/src/data/pixelPalettes.ts` — **已废弃**（像素风格色板，已无引用，可删）。
 - 已实现：
-  - 转换：7 生成算法 + 4 平替算法（默认 `lab` 丝滑匹配）。拖入/选择图片
+  - 转换：8 生成算法 + 4 平替算法（默认 `lab` 丝滑匹配）。拖入/选择图片
     （上传区或画布上拖放皆可）会**自动转换**；改宽度/算法/色板从原图重新
     量化生成（防抖）；自动重生成前会 `pushHistory`，故 **可 Ctrl+Z 撤销回
     上一次设置**（撤销会同步宽度滑块，`suppressReconv` 防其再触发转换）。
@@ -71,8 +73,9 @@
   - 空白画布：不导入图片，按宽×高「新建空白画布」直接手绘；无源图时改
     网格宽度＝对当前画布做最近邻重采样缩放（`resampleGrid`，可撤销）。
   - 一键描边：沿图案外缘补一圈「当前色」（空格中与图案相邻的格变描边色）。
-  - 一键去背景：从四边洪水填充，清除与边缘相连、接近主导边缘色的格子
-    （`removeBackground`，连通性 + RGB 容差，适合背景较干净的图）。
+  - 抠图/去背景：边缘洪水填充识别背景（`detectBackgroundCells`，从四边
+    连通 + RGB 容差）。「✂️ 去背景」按钮手动去除；设置区「自动抠图」勾选
+    后每次转换自动识别主体、只转主体。适合背景较干净的图。
   - 色板模式：套装色板（8 档）/ 我的色板（自定义，`localStorage` 持久化，
     可从色卡弹窗勾选或从图纸导入）。
   - 编辑工具：画笔 / 橡皮 / 魔棒画笔 / 魔棒橡皮 / 同色替换 / 镜像复制 / 取色 / 移动。
