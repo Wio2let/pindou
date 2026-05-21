@@ -1,0 +1,370 @@
+/* ================================================================
+   usePerler — image → perler-bead grid conversion (pure, client-side)
+   ================================================================ */
+
+import { MARD_COLORS, type BeadColor } from '../data/mardPalettes'
+
+export interface PerlerGrid {
+  width: number
+  height: number
+  cells: (string | null)[]   // MARD code, or null for an empty (transparent) cell
+}
+
+/** Pixelation algorithms. */
+export type ConvertAlgo = 'smooth' | 'avg' | 'sharp' | 'floyd' | 'atkinson' | 'bayer'
+
+export const ALGO_OPTIONS: { id: ConvertAlgo; label: string; desc: string }[] = [
+  { id: 'smooth',   label: '平滑取色',       desc: '双线性缩放后最近邻匹配，适合照片' },
+  { id: 'avg',      label: '区域平均',        desc: '四倍中间帧降采样取均值，颜色过渡更柔和' },
+  { id: 'sharp',    label: '锐利像素',        desc: '边缘保留降采样，线条与轮廓清晰不丢失，适合像素图/线稿/Logo' },
+  { id: 'floyd',    label: '抖动 · Floyd',   desc: 'Floyd-Steinberg 误差扩散，渐变更细腻' },
+  { id: 'atkinson', label: '抖动 · Atkinson', desc: 'Atkinson 抖动，轮廓清晰，颗粒感弱' },
+  { id: 'bayer',    label: '抖动 · Bayer',   desc: '有序抖动，规则颗粒感，复古风格' },
+]
+
+/**
+ * Color-matching ("平替") metric — decides which available palette color
+ * substitutes for a color the chosen kit does not stock.
+ */
+export type MatchMetric = 'weighted' | 'hue' | 'luma'
+
+export const MATCH_OPTIONS: { id: MatchMetric; label: string; desc: string }[] = [
+  { id: 'weighted', label: '加权匹配',     desc: '综合最接近，色彩最自然（默认）' },
+  { id: 'hue',      label: '同色相优先',   desc: '优先保留色相，色系一致' },
+  { id: 'luma',     label: '同明度优先',   desc: '优先保留明暗，层次清晰' },
+]
+
+// ---- RGB → HSL ----
+function rgb2hsl(r: number, g: number, b: number): [number, number, number] {
+  r /= 255; g /= 255; b /= 255
+  const max = Math.max(r, g, b), min = Math.min(r, g, b)
+  const d = max - min
+  let h = 0
+  const l = (max + min) / 2
+  const s = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1))
+  if (d > 0) {
+    if (max === r) h = ((g - b) / d) % 6
+    else if (max === g) h = (b - r) / d + 2
+    else h = (r - g) / d + 4
+    h *= 60
+    if (h < 0) h += 360
+  }
+  return [h, s, l]
+}
+
+/** redmean weighted Euclidean distance. */
+function redmean(
+  r1: number, g1: number, b1: number,
+  r2: number, g2: number, b2: number,
+): number {
+  const rm = (r1 + r2) / 2
+  const dr = r1 - r2, dg = g1 - g2, db = b1 - b2
+  return (2 + rm / 256) * dr * dr + 4 * dg * dg + (2 + (255 - rm) / 256) * db * db
+}
+
+/**
+ * Nearest bead color in a palette to an RGB triple, under the chosen
+ * matching metric. This is the core of the "平替" (substitute) logic:
+ * any color the kit lacks is replaced by its nearest stocked color.
+ */
+export function nearestColor(
+  r: number, g: number, b: number, palette: BeadColor[],
+  metric: MatchMetric = 'weighted',
+): BeadColor {
+  let best = palette[0]
+  let bestD = Infinity
+
+  if (metric === 'weighted') {
+    for (const c of palette) {
+      const d = redmean(r, g, b, c.rgb[0], c.rgb[1], c.rgb[2])
+      if (d < bestD) { bestD = d; best = c }
+    }
+    return best
+  }
+
+  // hue / luma metrics work in HSL space
+  const [ph, ps, pl] = rgb2hsl(r, g, b)
+  for (const c of palette) {
+    const [ch, cs, cl] = c.hsl
+    let dh = Math.abs(ph - ch)
+    if (dh > 180) dh = 360 - dh
+    const dhn = dh / 180
+    const ds = ps - cs
+    const dl = pl - cl
+    let d: number
+    if (metric === 'hue') {
+      // hue dominates; saturation/lightness are tie-breakers
+      d = dhn * dhn * 9 + ds * ds * 1.2 + dl * dl * 1.0
+      // desaturated pixels have unstable hue → fall back to lightness
+      if (ps < 0.12) d = dl * dl * 6 + ds * ds
+    } else {
+      // luma dominates
+      d = dl * dl * 10 + ds * ds * 0.8 + dhn * dhn * 0.5
+    }
+    if (d < bestD) { bestD = d; best = c }
+  }
+  return best
+}
+
+function clamp255(v: number): number {
+  return v < 0 ? 0 : v > 255 ? 255 : v
+}
+
+// 4×4 Bayer threshold matrix (values 0–15)
+const BAYER4 = [
+  [0,  8,  2, 10],
+  [12, 4, 14,  6],
+  [3,  11, 1,  9],
+  [15, 7, 13,  5],
+]
+
+/**
+ * Convert an image to a bead grid restricted to `palette` (the selected kit).
+ * `algo` = pixelation strategy, `metric` = how out-of-kit colors are matched.
+ */
+export function imageToGrid(
+  img: HTMLImageElement,
+  targetWidth: number,
+  palette: BeadColor[],
+  algo: ConvertAlgo = 'smooth',
+  metric: MatchMetric = 'weighted',
+): PerlerGrid {
+  const ratio = (img.naturalHeight || img.height) / (img.naturalWidth || img.width)
+  const w = Math.max(1, Math.round(targetWidth))
+  const h = Math.max(1, Math.round(w * ratio))
+
+  const cells: (string | null)[] = new Array(w * h)
+
+  // ---- avg: two-pass area-average downsampling ----
+  if (algo === 'avg') {
+    // render at 4× resolution first, then downsample to final size
+    const tmp = document.createElement('canvas')
+    tmp.width = w * 4
+    tmp.height = h * 4
+    const tctx = tmp.getContext('2d', { willReadFrequently: true })!
+    tctx.imageSmoothingEnabled = true
+    tctx.imageSmoothingQuality = 'high'
+    tctx.clearRect(0, 0, tmp.width, tmp.height)
+    tctx.drawImage(img, 0, 0, tmp.width, tmp.height)
+
+    const cv = document.createElement('canvas')
+    cv.width = w
+    cv.height = h
+    const ctx = cv.getContext('2d', { willReadFrequently: true })!
+    ctx.imageSmoothingEnabled = true
+    ctx.imageSmoothingQuality = 'high'
+    ctx.clearRect(0, 0, w, h)
+    ctx.drawImage(tmp, 0, 0, w, h)
+
+    const data = ctx.getImageData(0, 0, w, h).data
+    for (let i = 0; i < w * h; i++) {
+      if (data[i * 4 + 3] < 128) { cells[i] = null; continue }
+      cells[i] = nearestColor(data[i * 4], data[i * 4 + 1], data[i * 4 + 2], palette, metric).code
+    }
+    return { width: w, height: h, cells }
+  }
+
+  // ---- sharp: edge-preserving downsample ----
+  // Nearest-neighbor downsampling drops thin outlines and aliases hard edges.
+  // Instead, render the source at a higher resolution and, for every output
+  // cell, detect whether a strong edge runs through it. On an edge cell the
+  // darker pixel cluster wins — so contours / 线条 stay crisp, connected and
+  // fully recognizable; flat regions keep their clean average color.
+  if (algo === 'sharp') {
+    const scale = 5
+    const sw = w * scale, sh = h * scale
+    const tmp = document.createElement('canvas')
+    tmp.width = sw
+    tmp.height = sh
+    const tctx = tmp.getContext('2d', { willReadFrequently: true })!
+    tctx.imageSmoothingEnabled = true
+    tctx.imageSmoothingQuality = 'high'
+    tctx.clearRect(0, 0, sw, sh)
+    tctx.drawImage(img, 0, 0, sw, sh)
+    const sd = tctx.getImageData(0, 0, sw, sh).data
+    const lumaOf = (r: number, g: number, b: number) => 0.299 * r + 0.587 * g + 0.114 * b
+    // luminance-contrast threshold for "an edge runs through this cell"
+    const EDGE = 42
+
+    for (let cy = 0; cy < h; cy++) {
+      for (let cx = 0; cx < w; cx++) {
+        // pass 1 — block average + luminance range
+        let aR = 0, aG = 0, aB = 0, opaque = 0
+        let minL = 256, maxL = -1
+        for (let dy = 0; dy < scale; dy++) {
+          for (let dx = 0; dx < scale; dx++) {
+            const i = ((cy * scale + dy) * sw + (cx * scale + dx)) * 4
+            if (sd[i + 3] < 128) continue
+            opaque++
+            aR += sd[i]; aG += sd[i + 1]; aB += sd[i + 2]
+            const l = lumaOf(sd[i], sd[i + 1], sd[i + 2])
+            if (l < minL) minL = l
+            if (l > maxL) maxL = l
+          }
+        }
+        const cell = cy * w + cx
+        if (opaque * 2 < scale * scale) { cells[cell] = null; continue }
+        aR /= opaque; aG /= opaque; aB /= opaque
+
+        let r = aR, g = aG, b = aB
+        if (maxL - minL >= EDGE) {
+          // pass 2 — an edge runs through; average only the darker cluster
+          // so the outline color wins and stays connected
+          const mid = (minL + maxL) / 2
+          let dR = 0, dG = 0, dB = 0, dN = 0
+          for (let dy = 0; dy < scale; dy++) {
+            for (let dx = 0; dx < scale; dx++) {
+              const i = ((cy * scale + dy) * sw + (cx * scale + dx)) * 4
+              if (sd[i + 3] < 128) continue
+              if (lumaOf(sd[i], sd[i + 1], sd[i + 2]) <= mid) {
+                dR += sd[i]; dG += sd[i + 1]; dB += sd[i + 2]; dN++
+              }
+            }
+          }
+          if (dN > 0) { r = dR / dN; g = dG / dN; b = dB / dN }
+        }
+        cells[cell] = nearestColor(r, g, b, palette, metric).code
+      }
+    }
+    return { width: w, height: h, cells }
+  }
+
+  // ---- all other algorithms: render to a single canvas ----
+  const cv = document.createElement('canvas')
+  cv.width = w
+  cv.height = h
+  const ctx = cv.getContext('2d', { willReadFrequently: true })!
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = 'high'
+  ctx.clearRect(0, 0, w, h)
+  ctx.drawImage(img, 0, 0, w, h)
+
+  const data = ctx.getImageData(0, 0, w, h).data
+
+  if (algo === 'floyd') {
+    // Floyd-Steinberg error diffusion
+    const buf = new Float32Array(w * h * 3)
+    for (let i = 0; i < w * h; i++) {
+      buf[i * 3]     = data[i * 4]
+      buf[i * 3 + 1] = data[i * 4 + 1]
+      buf[i * 3 + 2] = data[i * 4 + 2]
+    }
+    const spread = (idx: number, er: number, eg: number, eb: number, f: number) => {
+      buf[idx * 3]     += er * f
+      buf[idx * 3 + 1] += eg * f
+      buf[idx * 3 + 2] += eb * f
+    }
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const idx = y * w + x
+        if (data[idx * 4 + 3] < 128) { cells[idx] = null; continue }
+        const r = clamp255(buf[idx * 3])
+        const g = clamp255(buf[idx * 3 + 1])
+        const b = clamp255(buf[idx * 3 + 2])
+        const nc = nearestColor(r, g, b, palette, metric)
+        cells[idx] = nc.code
+        const er = r - nc.rgb[0], eg = g - nc.rgb[1], eb = b - nc.rgb[2]
+        // Floyd-Steinberg: right 7/16, bottom-left 3/16, below 5/16, bottom-right 1/16
+        if (x + 1 < w)           spread(idx + 1,     er, eg, eb, 7 / 16)
+        if (y + 1 < h) {
+          if (x > 0)             spread(idx + w - 1, er, eg, eb, 3 / 16)
+          /*                */   spread(idx + w,     er, eg, eb, 5 / 16)
+          if (x + 1 < w)        spread(idx + w + 1, er, eg, eb, 1 / 16)
+        }
+      }
+    }
+  } else if (algo === 'atkinson') {
+    // Atkinson dithering: 6 neighbors each get 1/8 of error (2/8 discarded)
+    const buf = new Float32Array(w * h * 3)
+    for (let i = 0; i < w * h; i++) {
+      buf[i * 3]     = data[i * 4]
+      buf[i * 3 + 1] = data[i * 4 + 1]
+      buf[i * 3 + 2] = data[i * 4 + 2]
+    }
+    const spread = (idx: number, er: number, eg: number, eb: number) => {
+      if (idx < 0 || idx >= w * h) return
+      buf[idx * 3]     += er / 8
+      buf[idx * 3 + 1] += eg / 8
+      buf[idx * 3 + 2] += eb / 8
+    }
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const idx = y * w + x
+        if (data[idx * 4 + 3] < 128) { cells[idx] = null; continue }
+        const r = clamp255(buf[idx * 3])
+        const g = clamp255(buf[idx * 3 + 1])
+        const b = clamp255(buf[idx * 3 + 2])
+        const nc = nearestColor(r, g, b, palette, metric)
+        cells[idx] = nc.code
+        const er = r - nc.rgb[0], eg = g - nc.rgb[1], eb = b - nc.rgb[2]
+        // Atkinson: right×2, bottom-left, below, bottom-right, 2-below
+        if (x + 1 < w)            spread(idx + 1,         er, eg, eb)
+        if (x + 2 < w)            spread(idx + 2,         er, eg, eb)
+        if (y + 1 < h) {
+          if (x > 0)              spread(idx + w - 1,     er, eg, eb)
+          /*                */    spread(idx + w,         er, eg, eb)
+          if (x + 1 < w)         spread(idx + w + 1,     er, eg, eb)
+        }
+        if (y + 2 < h)            spread(idx + w * 2,     er, eg, eb)
+      }
+    }
+  } else if (algo === 'bayer') {
+    // Ordered Bayer dithering (4×4 matrix)
+    const strength = 40
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const idx = y * w + x
+        if (data[idx * 4 + 3] < 128) { cells[idx] = null; continue }
+        const t = (BAYER4[y & 3][x & 3] / 16 - 0.5) * strength
+        const br = clamp255(data[idx * 4]     + t)
+        const bg = clamp255(data[idx * 4 + 1] + t)
+        const bb = clamp255(data[idx * 4 + 2] + t)
+        cells[idx] = nearestColor(br, bg, bb, palette, metric).code
+      }
+    }
+  } else {
+    // smooth — bilinear-scaled per-pixel nearest match
+    for (let i = 0; i < w * h; i++) {
+      if (data[i * 4 + 3] < 128) { cells[i] = null; continue }
+      cells[i] = nearestColor(data[i * 4], data[i * 4 + 1], data[i * 4 + 2], palette, metric).code
+    }
+  }
+
+  return { width: w, height: h, cells }
+}
+
+/** Count beads used per MARD code. */
+export function countColors(grid: PerlerGrid): Map<string, number> {
+  const m = new Map<string, number>()
+  for (const c of grid.cells) {
+    if (!c) continue
+    m.set(c, (m.get(c) || 0) + 1)
+  }
+  return m
+}
+
+/**
+ * Codes used by the pattern that a given tier does NOT contain
+ * (= colors you'd be missing if you only owned that kit).
+ */
+export function paletteGaps(usedCodes: Iterable<string>, tierCodes: string[]): BeadColor[] {
+  const tierSet = new Set(tierCodes)
+  const gaps: BeadColor[] = []
+  for (const code of usedCodes) {
+    if (!tierSet.has(code) && MARD_COLORS[code]) gaps.push(MARD_COLORS[code])
+  }
+  return gaps
+}
+
+/** The substitute (平替) color for `color` within a given palette. */
+export function substituteFor(
+  color: BeadColor, palette: BeadColor[], metric: MatchMetric = 'weighted',
+): BeadColor {
+  return nearestColor(color.rgb[0], color.rgb[1], color.rgb[2], palette, metric)
+}
+
+/** Pick black or white text for legibility on a given bead color. */
+export function textOn(rgb: [number, number, number]): string {
+  const lum = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]
+  return lum > 150 ? '#2a2030' : '#ffffff'
+}
