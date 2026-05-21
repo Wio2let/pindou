@@ -15,5 +15,17 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src/**/*.ts", "src/**/*.vue"]
+  "include": [
+    "src/env.d.ts",
+    "src/main.ts",
+    "src/App.vue",
+    "src/router/index.ts",
+    "src/styles/**/*.css",
+    "src/views/BeadStudio.vue",
+    "src/views/MardCards.vue",
+    "src/components/Bead*.vue",
+    "src/composables/usePerler.ts",
+    "src/data/mardPalettes.ts",
+    "src/data/shopData.ts"
+  ]
 }
