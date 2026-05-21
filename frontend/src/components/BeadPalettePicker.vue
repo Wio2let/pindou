@@ -7,6 +7,13 @@
         <button class="modal-close" @click="$emit('close')">✕</button>
       </div>
 
+      <!-- one-click MARD kit presets -->
+      <div class="pal-tiers">
+        <span class="pal-tiers-label">一键选套装</span>
+        <button v-for="t in TIER_ORDER" :key="t" class="pal-tier-btn"
+                @click="selectTier(t)">{{ t }} 色</button>
+      </div>
+
       <!-- search + series tabs -->
       <div class="pal-toolbar">
         <input class="input pal-search" v-model="query" placeholder="搜索色号 / 颜色名…" />
@@ -57,7 +64,10 @@
 
 <script setup lang="ts">
 import { ref, computed, reactive } from 'vue'
-import { MARD_COLORS, MARD_GROUPS, type BeadColor } from '../data/mardPalettes'
+import {
+  MARD_COLORS, MARD_GROUPS, MARD_TIERS, TIER_ORDER,
+  type Tier, type BeadColor,
+} from '../data/mardPalettes'
 import { textOn } from '../composables/usePerler'
 
 const props = defineProps<{ codes: string[] }>()
@@ -119,6 +129,13 @@ function toggleGroup(g: { colors: BeadColor[]; selCount: number }) {
 }
 function selectNone() { sel.clear() }
 function selectAll() { for (const c of allColors) sel.add(c.code) }
+/** one-click: replace selection with a MARD kit tier */
+function selectTier(t: Tier) {
+  sel.clear()
+  for (const code of MARD_TIERS[t]) {
+    if (MARD_COLORS[code]) sel.add(code)
+  }
+}
 function apply() {
   // commit in canonical MARD series order for a tidy palette
   emit('apply', allColors.filter(c => sel.has(c.code)).map(c => c.code))
@@ -156,6 +173,33 @@ function apply() {
 .modal-close:hover { color: var(--plum-1); }
 
 /* toolbar */
+.pal-tiers {
+  display: flex; align-items: center; gap: 0.35rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.6rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1.5px dashed var(--line-strong);
+}
+.pal-tiers-label {
+  font-size: 0.74rem; font-weight: 700; color: var(--plum-2);
+  margin-right: 0.2rem;
+}
+.pal-tier-btn {
+  padding: 0.22rem 0.6rem;
+  border: 2px solid var(--cream-4);
+  background: #fff;
+  border-radius: var(--radius-pill);
+  font-family: var(--font-round);
+  font-weight: 700;
+  font-size: 0.74rem;
+  color: var(--plum-2);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+.pal-tier-btn:hover {
+  border-color: var(--sakura); color: var(--sakura-deep);
+  background: var(--sakura-glow);
+}
 .pal-toolbar {
   display: flex; align-items: center; gap: 0.7rem;
   margin-bottom: 0.7rem; flex-wrap: wrap;

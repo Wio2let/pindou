@@ -26,14 +26,25 @@
           <div class="form-row">
             <label>网格宽度（横向豆数）</label>
             <div class="flex items-center gap-3">
-              <input type="range" min="16" max="150" step="1"
+              <input type="range" min="16" max="180" step="1"
                      v-model.number="gridWidth" class="slider" />
-              <input type="number" min="16" max="150"
+              <input type="number" min="8" max="220"
                      v-model.number="gridWidth" class="input" style="width:80px;" />
             </div>
             <span class="form-hint" v-if="sourceImg">
               成品约 {{ gridWidth }} × {{ estHeight }} 颗豆
             </span>
+          </div>
+
+          <div class="form-row">
+            <label>网格高度（纵向豆数）</label>
+            <div class="flex items-center gap-3">
+              <input type="range" min="16" max="180" step="1"
+                     v-model.number="blankHeight" class="slider" />
+              <input type="number" min="8" max="220"
+                     v-model.number="blankHeight" class="input" style="width:80px;" />
+            </div>
+            <span class="form-hint">仅用于「新建空白画布」；导入图片时高度按比例自动计算</span>
           </div>
 
           <div class="form-row">
@@ -77,6 +88,10 @@
                   @click="convert(true)">
             {{ converting ? '转换中…' : grid ? '🔄 重新转换' : '✨ 转换成拼豆图纸' }}
           </button>
+          <button class="btn btn-ghost convert-btn"
+                  @click="newBlankGrid">
+            ✏️ 新建空白画布（{{ gridWidth }} × {{ blankHeight }}）
+          </button>
         </div>
       </div>
     </div>
@@ -84,7 +99,7 @@
     <!-- ===== Empty state ===== -->
     <div v-if="!grid" class="empty-state" style="margin-top:2rem;">
       <div class="empty-icon">🧩</div>
-      <div class="empty-text">上传一张图片，转换成可编辑的拼豆图纸吧~</div>
+      <div class="empty-text">上传图片转换，或点上方「✏️ 新建空白画布」直接开画~</div>
     </div>
 
     <!-- ===== Workspace ===== -->
@@ -428,9 +443,10 @@ const sourcePreview = ref('')
 const isDragging = ref(false)
 
 const gridWidth = ref(56)
+const blankHeight = ref(56)                // height for "new blank canvas"
 const tier = ref<Tier>('264')
 const algo = ref<ConvertAlgo>('smooth')
-const matchMetric = ref<MatchMetric>('weighted')
+const matchMetric = ref<MatchMetric>('lab')
 const showLabels = ref(false)   // show MARD codes on every bead (canvas + export)
 const beadShape = ref<BeadShape>('circle')
 const beadSize = ref(2.6)                 // physical bead diameter, mm
@@ -674,6 +690,28 @@ async function convert(refit = true) {
   } finally {
     converting.value = false
   }
+}
+
+// ---- new blank canvas (draw from scratch, no image) ----
+function newBlankGrid() {
+  if (workingPalette.value.length === 0) {
+    ElMessage.warning('当前色板为空，请先切换到套装色板或添加颜色')
+    return
+  }
+  const w = Math.max(8, Math.min(220, Math.round(gridWidth.value)))
+  const h = Math.max(8, Math.min(220, Math.round(blankHeight.value)))
+  sourceImg.value = null
+  sourcePreview.value = ''
+  grid.value = { width: w, height: h, cells: new Array(w * h).fill(null) }
+  gridVersion.value++
+  undoStack.length = 0
+  redoStack.length = 0
+  histVer.value++
+  if (!currentCode.value || !workingPalette.value.some(c => c.code === currentCode.value)) {
+    currentCode.value = workingPalette.value[0]?.code || ''
+  }
+  tool.value = 'paint'
+  nextTick(() => { syncCanvasSize(); fitView() })
 }
 
 // Live re-convert while editing — board sizes vary, so width / algorithm /

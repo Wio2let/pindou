@@ -26,10 +26,11 @@ export const ALGO_OPTIONS: { id: ConvertAlgo; label: string; desc: string }[] = 
  * Color-matching ("平替") metric — decides which available palette color
  * substitutes for a color the chosen kit does not stock.
  */
-export type MatchMetric = 'weighted' | 'hue' | 'luma'
+export type MatchMetric = 'lab' | 'weighted' | 'hue' | 'luma'
 
 export const MATCH_OPTIONS: { id: MatchMetric; label: string; desc: string }[] = [
-  { id: 'weighted', label: '加权匹配',     desc: '综合最接近，色彩最自然（默认）' },
+  { id: 'lab',      label: '丝滑匹配',     desc: '感知均匀色彩空间匹配，渐变丝滑、色彩纯净不混杂（推荐）' },
+  { id: 'weighted', label: '加权匹配',     desc: 'redmean 加权，综合最接近' },
   { id: 'hue',      label: '同色相优先',   desc: '优先保留色相，色系一致' },
   { id: 'luma',     label: '同明度优先',   desc: '优先保留明暗，层次清晰' },
 ]
@@ -62,6 +63,30 @@ function redmean(
   return (2 + rm / 256) * dr * dr + 4 * dg * dg + (2 + (255 - rm) / 256) * db * db
 }
 
+// ---- sRGB → CIELAB (D65) ----
+function rgb2lab(r: number, g: number, b: number): [number, number, number] {
+  // sRGB → linear
+  let rl = r / 255, gl = g / 255, bl = b / 255
+  rl = rl > 0.04045 ? Math.pow((rl + 0.055) / 1.055, 2.4) : rl / 12.92
+  gl = gl > 0.04045 ? Math.pow((gl + 0.055) / 1.055, 2.4) : gl / 12.92
+  bl = bl > 0.04045 ? Math.pow((bl + 0.055) / 1.055, 2.4) : bl / 12.92
+  // linear RGB → XYZ → normalize to D65 white
+  let x = (rl * 0.4124 + gl * 0.3576 + bl * 0.1805) / 0.95047
+  let y = (rl * 0.2126 + gl * 0.7152 + bl * 0.0722)
+  let z = (rl * 0.0193 + gl * 0.1192 + bl * 0.9505) / 1.08883
+  const f = (t: number) => t > 0.008856 ? Math.cbrt(t) : (7.787 * t + 16 / 116)
+  x = f(x); y = f(y); z = f(z)
+  return [116 * y - 16, 500 * (x - y), 200 * (y - z)]
+}
+
+// memoized CIELAB for palette colors (computed once per code)
+const _labCache = new Map<string, [number, number, number]>()
+function labOf(c: BeadColor): [number, number, number] {
+  let v = _labCache.get(c.code)
+  if (!v) { v = rgb2lab(c.rgb[0], c.rgb[1], c.rgb[2]); _labCache.set(c.code, v) }
+  return v
+}
+
 /**
  * Nearest bead color in a palette to an RGB triple, under the chosen
  * matching metric. This is the core of the "平替" (substitute) logic:
@@ -69,10 +94,35 @@ function redmean(
  */
 export function nearestColor(
   r: number, g: number, b: number, palette: BeadColor[],
-  metric: MatchMetric = 'weighted',
+  metric: MatchMetric = 'lab',
 ): BeadColor {
   let best = palette[0]
   let bestD = Infinity
+
+  if (metric === 'lab') {
+    // ΔE94-style distance in perceptually-uniform CIELAB.
+    // Perceptual uniformity → gradients band smoothly ("丝滑");
+    // hue is weighted up and de-saturation is penalized → no muddy
+    // ("混杂") substitutes.
+    const [pL, pa, pb] = rgb2lab(r, g, b)
+    const pC = Math.sqrt(pa * pa + pb * pb)
+    const sC = 1 + 0.045 * pC
+    const sH = 1 + 0.015 * pC
+    for (const c of palette) {
+      const [cL, ca, cb] = labOf(c)
+      const cC = Math.sqrt(ca * ca + cb * cb)
+      const dL = pL - cL
+      const dC = pC - cC
+      const da = pa - ca, db = pb - cb
+      let dH2 = da * da + db * db - dC * dC
+      if (dH2 < 0) dH2 = 0
+      let dCsq = (dC * dC) / (sC * sC)
+      if (dC > 0) dCsq *= 1.6                       // duller candidate → muddy, penalize
+      const d = dL * dL + dCsq + (dH2 / (sH * sH)) * 1.35
+      if (d < bestD) { bestD = d; best = c }
+    }
+    return best
+  }
 
   if (metric === 'weighted') {
     for (const c of palette) {
@@ -127,7 +177,7 @@ export function imageToGrid(
   targetWidth: number,
   palette: BeadColor[],
   algo: ConvertAlgo = 'smooth',
-  metric: MatchMetric = 'weighted',
+  metric: MatchMetric = 'lab',
 ): PerlerGrid {
   const ratio = (img.naturalHeight || img.height) / (img.naturalWidth || img.width)
   const w = Math.max(1, Math.round(targetWidth))
@@ -358,7 +408,7 @@ export function paletteGaps(usedCodes: Iterable<string>, tierCodes: string[]): B
 
 /** The substitute (平替) color for `color` within a given palette. */
 export function substituteFor(
-  color: BeadColor, palette: BeadColor[], metric: MatchMetric = 'weighted',
+  color: BeadColor, palette: BeadColor[], metric: MatchMetric = 'lab',
 ): BeadColor {
   return nearestColor(color.rgb[0], color.rgb[1], color.rgb[2], palette, metric)
 }
