@@ -83,6 +83,15 @@
             <span class="form-hint">{{ workingPalette.length > 0 ? `已选 ${workingPalette.length} 色，可在右侧「我的色板」面板管理` : '⚠ 尚未添加任何颜色，请在右侧面板添加' }}</span>
           </div>
 
+          <div class="form-row">
+            <label>自动抠图</label>
+            <label class="subj-check">
+              <input type="checkbox" v-model="subjectOnly" />
+              <span>转换时自动识别主体、去除背景（只转主体）</span>
+            </label>
+            <span class="form-hint">背景较干净的图（贴纸 / Logo / 单色底）效果最佳</span>
+          </div>
+
           <button class="btn btn-primary convert-btn"
                   :disabled="!sourceImg || converting"
                   @click="convert(true)">
@@ -462,6 +471,7 @@ const blankHeight = ref(56)                // height for "new blank canvas"
 const tier = ref<Tier>('264')
 const algo = ref<ConvertAlgo>('smooth')
 const matchMetric = ref<MatchMetric>('lab')
+const subjectOnly = ref(false)            // auto-detect subject, drop background on convert
 const showLabels = ref(false)   // show MARD codes on every bead (canvas + export)
 const beadShape = ref<BeadShape>('circle')
 const beadSize = ref(2.6)                 // physical bead diameter, mm
@@ -694,6 +704,10 @@ async function convert(refit = true) {
       sourceImg.value, gridWidth.value, workingPalette.value,
       algo.value, matchMetric.value,
     )
+    // 自动抠图：识别主体、清除背景，只保留主体
+    if (subjectOnly.value) {
+      for (const i of detectBackgroundCells(grid.value)) grid.value.cells[i] = null
+    }
     gridVersion.value++
     if (refit) {
       // a fresh conversion from the button invalidates the edit history
@@ -765,7 +779,7 @@ function resampleGrid(newW: number, newH: number) {
 // `suppressReconv` blocks the watch while undo/redo syncs the width slider.
 let suppressReconv = false
 let reconvTimer: number | undefined
-watch([gridWidth, algo, tier, matchMetric, palMode, myPaletteCodes], (nv, ov) => {
+watch([gridWidth, algo, tier, matchMetric, palMode, myPaletteCodes, subjectOnly], (nv, ov) => {
   if (suppressReconv || !grid.value || transforming.value) return
   if (reconvTimer) clearTimeout(reconvTimer)
   if (sourceImg.value) {
@@ -1018,9 +1032,12 @@ function outlineShape() {
 // Flood-fill inward from all four edges, clearing cells whose color is close
 // to the dominant border color. Identifies the subject by what's left.
 // Works best on photos / stickers with a relatively uniform background.
-function removeBackground() {
-  const g = grid.value
-  if (!g) return
+/**
+ * Detect edge-connected background cells: flood-fill inward from the four
+ * borders, collecting cells whose color is close to the dominant border
+ * color. Returns the indices of background cells (the rest = the subject).
+ */
+function detectBackgroundCells(g: PerlerGrid): number[] {
   const w = g.width, h = g.height
   // dominant border code = the background color
   const borderCount = new Map<string, number>()
@@ -1032,7 +1049,7 @@ function removeBackground() {
   let bgCode = '', bgN = 0
   for (const [code, n] of borderCount) if (n > bgN) { bgN = n; bgCode = code }
   const bg = bgCode ? MARD_COLORS[bgCode] : null
-  if (!bg) { ElMessage.info('未检测到背景色（图纸四边为空）'); return }
+  if (!bg) return []
   // a cell is "background" if its color is close enough to the border color
   const TOL = 11000   // ≈ 60 / channel, sum of squared RGB difference
   const isBg = (i: number): boolean => {
@@ -1060,6 +1077,13 @@ function removeBackground() {
     if (y + 1 < h) seed(i + w)
     if (y - 1 >= 0) seed(i - w)
   }
+  return removed
+}
+
+function removeBackground() {
+  const g = grid.value
+  if (!g) return
+  const removed = detectBackgroundCells(g)
   if (!removed.length) { ElMessage.info('未检测到可去除的背景'); return }
   pushHistory()
   for (const i of removed) g.cells[i] = null
@@ -2420,6 +2444,18 @@ watch(tier, () => {
   border-radius: var(--radius-pill);
   padding: 2px;
 }
+
+/* auto-subject checkbox */
+.subj-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.82rem;
+  color: var(--plum-2);
+  cursor: pointer;
+  user-select: none;
+}
+.subj-check input { cursor: pointer; }
 .mode-btn {
   padding: 0.28rem 0.75rem;
   border: 2px solid transparent;
