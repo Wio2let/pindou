@@ -7,6 +7,15 @@
       </div>
 
       <div class="modal-body">
+        <!-- Live preview of the exported result -->
+        <div class="export-preview">
+          <div class="export-preview-stage">
+            <img v-if="preview" :src="preview" alt="导出预览" class="export-preview-img" />
+            <span v-else class="export-preview-empty">预览生成中…</span>
+          </div>
+          <span class="export-preview-cap">📄 导出预览 · {{ grid.width }} × {{ grid.height }}（即下载图纸的样子）</span>
+        </div>
+
         <!-- Format cards -->
         <div class="export-formats">
           <button v-for="fmt in FORMATS" :key="fmt.id"
@@ -64,6 +73,7 @@ const props = defineProps<{
   beadShape: string
   totalBeads: number
   mardColors: Record<string, { name: string; hex: string; rgb: [number, number, number] }>
+  preview: string
 }>()
 
 const emit = defineEmits<{
@@ -146,5 +156,30 @@ function doExport() {
 }
 .export-note {
   text-align: center; font-size: 0.7rem; color: var(--plum-3); line-height: 1.5;
+}
+
+/* export preview */
+.export-preview { display: flex; flex-direction: column; gap: 0.3rem; }
+.export-preview-stage {
+  display: flex; align-items: center; justify-content: center;
+  background: var(--cream-2);
+  border: 2px dashed var(--line-strong);
+  border-radius: var(--radius-md);
+  padding: 0.5rem;
+  max-height: 320px;
+  overflow: hidden;
+}
+.export-preview-img {
+  max-width: 100%;
+  max-height: 300px;
+  object-fit: contain;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-soft);
+}
+.export-preview-empty {
+  font-size: 0.78rem; color: var(--plum-3); padding: 2.5rem 1rem;
+}
+.export-preview-cap {
+  text-align: center; font-size: 0.68rem; color: var(--plum-3);
 }
 </style>

@@ -48,10 +48,14 @@
 - `frontend/src/views/MardCards.vue` — MARD 色卡浏览（8 档套装：24/48/72/96/120/144/216/264）。
 - `frontend/src/components/BeadPalettePicker.vue` — 自定义色板选择弹窗
   （全部色号方块、按 A/B/C… 系列分类、可勾选）。
-- `frontend/src/components/BeadExportDialog.vue` — 导出弹窗（只选格式，样式跟随画布）。
-- `frontend/src/composables/usePerler.ts` — 转换逻辑：8 种生成算法
-  (smooth/avg/sharp/slic/block/floyd/atkinson/bayer)、4 种平替算法
+- `frontend/src/components/BeadExportDialog.vue` — 导出弹窗（选格式 + 导出预览图，样式跟随画布）。
+- `frontend/src/composables/usePerler.ts` — 转换逻辑：9 种生成算法
+  (native/smooth/avg/sharp/slic/block/floyd/atkinson/bayer)、4 种平替算法
   (lab/weighted/hue/luma)。
+  `native` 为「原图像素 1:1」——图片本身是像素画时按原始像素直接量化、
+  不缩放不模糊，网格尺寸＝原图像素尺寸（忽略宽度设置）；
+  `detectPixelArt()` 用行程分析（每段同色像素长度都是放大倍率的整数倍）
+  识别放大后的像素画、并算出原始分辨率，导入时自动启用 native。
   `sharp` 为边缘保留降采样（高分辨率重采样 + 暗簇优先，保轮廓）；
   `slic` 为 SLIC 超像素聚类（CIELAB+xy 空间，相似区域合并为扁平色块）；
   `block` 为色块归并（量化后 3×3 邻域多数表决迭代，相邻像素尽量同色）；
@@ -65,11 +69,17 @@
   更新色卡只需整体替换本文件，其余功能按色号工作。
 - `frontend/src/data/pixelPalettes.ts` — **已废弃**（像素风格色板，已无引用，可删）。
 - 已实现：
-  - 转换：8 生成算法 + 4 平替算法（默认 `lab` 丝滑匹配）。拖入/选择图片
+  - 转换：9 生成算法 + 4 平替算法（默认 `lab` 丝滑匹配）。拖入/选择图片
     （上传区或画布上拖放皆可）会**自动转换**；改宽度/算法/色板从原图重新
     量化生成（防抖）；自动重生成前会 `pushHistory`，故 **可 Ctrl+Z 撤销回
     上一次设置**（撤销会同步宽度滑块，`suppressReconv` 防其再触发转换）。
     「🔄 重新转换」按钮则是不可撤销的全新转换。
+  - 像素画原样导入：导入图片时 `detectPixelArt` 自动识别像素画，命中则切到
+    `native` 算法按原始像素 1:1 导入（弹 ElMessage 提示），并禁用宽度输入、
+    `syncWidthFromGrid` 把网格尺寸同步给宽度滑块；非像素画且当前为 native
+    时自动切回 `smooth`。也可在算法下拉手动选「原图像素 · 1:1」。
+  - 空格渲染：透明格画**比格子小的居中小方块**标记（`emptyMargin`/`emptySize`，
+    边长约 40% 格子、双色交替），让透明格与有豆格一眼可分；导出同此。
   - 空白画布：不导入图片，按宽×高「新建空白画布」直接手绘；无源图时改
     网格宽度＝对当前画布做最近邻重采样缩放（`resampleGrid`，可撤销）。
   - 一键描边：沿图案外缘补一圈「当前色」（空格中与图案相邻的格变描边色）。
@@ -78,18 +88,28 @@
     后每次转换自动识别主体、只转主体。适合背景较干净的图。
   - 色板模式：套装色板（8 档）/ 我的色板（自定义，`localStorage` 持久化，
     可从色卡弹窗勾选或从图纸导入）。
-  - 编辑工具：画笔 / 橡皮 / 魔棒画笔 / 魔棒橡皮 / 同色替换 / 镜像复制 / 取色 / 移动。
-    画笔与橡皮为**圆形**，按 **Shift+滚轮**调大小。
+  - 编辑工具：画笔 / 橡皮 / 魔棒画笔 / 魔棒橡皮 / 同色替换 / 镜像复制 /
+    选区移动 / 取色 / 移动。画笔与橡皮为**圆形**，按 **Shift+滚轮**调大小。
     魔棒画笔/橡皮 = 洪水填充点击处相连同色区域为当前色 / 清空。
     镜像复制 = 选竖/横对称轴 + 方向，点击即把一侧镜像到另一侧。
+  - 选区移动（select 工具）：拖拽框选矩形选区（带尺寸角标）；在选区内
+    按下拖动＝**剪切式整体平移**该区域（原位留空、落点覆盖），松手提交一次
+    撤销记录；Delete 清空选区内容、Esc 取消选区。任何结构性改变（转换/
+    撤销/翻转/变换…）会经 `watch(grid)` 自动清除选区。
+  - 全屏画布：工具栏 ⛶ 按钮 / F 键切换，`.canvas-col` 经 `<Teleport to="#app">`
+    传送出去后 `position:fixed` 占满视口（必须传送——`.main>*` 的 `pop-in`
+    动画 `both` 残留 transform 会困住 fixed）。导出/购买弹窗同样 `Teleport`
+    到 `#app` 才能盖在全屏画布之上（弹窗 z-index 100 > 画布 80）。
   - 变换：左右镜像 / 上下翻转 / **自由变换**（PS 式 Ctrl+T，8 手柄缩放 +
     任意角度旋转 + 平移，确认后重采样；撤销系统为完整快照支持尺寸变化）。
   - 豆型(圆/方/填满)、豆径(2.6/3/5mm)成品尺寸、撤销重做。
   - 快捷键：B 画笔 / E 橡皮 / G 魔棒画笔 / D 魔棒橡皮 / R 替换 / M 镜像 /
-    I 取色 / H·空格 移动 / Shift+滚轮 笔刷大小 / +- 缩放 / 0 适应 /
-    Ctrl+Z 撤销 / 变换中 Enter 应用·Esc 取消。
+    S 选区 / I 取色 / H·空格 移动 / F 全屏 / Shift+滚轮 笔刷大小 /
+    +- 缩放 / 0 适应 / Ctrl+Z 撤销 / 变换中 Enter 应用·Esc 取消。
   - 「标色号」勾选后**实时**在画布每颗豆上显示色号。
   - 导出 PNG/JPG/SVG/CSV —— 所见即所得，跟随画布当前豆型与标色号，无镜像选项。
+    导出弹窗内含**导出预览图**（`buildPatternCanvas` 复用导出渲染、缩放出
+    data-URL，所见即下载的样子）。
   - 缺色对比(缺色→平替)。
 
 ## 其它功能区
@@ -105,3 +125,12 @@ cd frontend && npx vite build          # 前端构建
 python -c "import py_compile; ..."     # 后端语法
 ```
 后端冒烟测试：起 `run.py` 后打 `GET /api/system/health`。
+
+## 在线发布（GitHub Pages）
+
+`bead-studio-only` 分支是**纯前端**版（路由只有 `/bead-studio` 两页、hash 路由、
+`vite.config.ts` `base:'./'`），可静态部署。`.github/workflows/deploy.yml`
+为 GitHub Actions：push 到 `bead-studio-only` 即 `npm ci` + `npx vite build`
+（构建用 vite、绕开有历史报错的 `vue-tsc`）并部署 `frontend/dist` 到 Pages。
+站点：<https://wio2let.github.io/pindou/>。仓库设置里 Pages 的 Source 需选
+「GitHub Actions」（一次性手动步骤）。

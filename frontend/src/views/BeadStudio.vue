@@ -27,11 +27,16 @@
             <label>网格宽度（横向豆数）</label>
             <div class="flex items-center gap-3">
               <input type="range" min="16" max="180" step="1"
-                     v-model.number="gridWidth" class="slider" />
+                     v-model.number="gridWidth" class="slider"
+                     :disabled="algo === 'native'" />
               <input type="number" min="8" max="220"
-                     v-model.number="gridWidth" class="input" style="width:80px;" />
+                     v-model.number="gridWidth" class="input" style="width:80px;"
+                     :disabled="algo === 'native'" />
             </div>
-            <span class="form-hint" v-if="sourceImg">
+            <span class="form-hint" v-if="algo === 'native'">
+              🧩 像素画模式：尺寸按原图像素自动确定，无需设置宽度
+            </span>
+            <span class="form-hint" v-else-if="sourceImg">
               成品约 {{ gridWidth }} × {{ estHeight }} 颗豆
             </span>
           </div>
@@ -113,8 +118,11 @@
 
     <!-- ===== Workspace ===== -->
     <div v-else class="workspace">
-      <!-- Canvas column -->
-      <div class="canvas-col card">
+      <!-- Canvas column — teleported to #app in fullscreen so position:fixed
+           escapes the transformed .bead-studio containing block, while staying
+           in #app's stacking context so modal dialogs (z-index 100) stay above -->
+      <Teleport to="#app" :disabled="!fullscreen">
+      <div class="canvas-col card" :class="{ fullscreen }">
         <!-- Toolbar -->
         <div class="toolbar">
           <div class="tool-group">
@@ -140,6 +148,10 @@
                     @click="mirrorDir = 1">{{ mirrorAxis === 'v' ? '左→右' : '上→下' }}</button>
             <button class="tool-btn mini-btn" :class="{ on: mirrorDir === -1 }"
                     @click="mirrorDir = -1">{{ mirrorAxis === 'v' ? '右→左' : '下→上' }}</button>
+          </div>
+          <!-- selection tool hint -->
+          <div class="size-tag sel-hint" v-show="tool === 'select'">
+            ⬚ 拖拽框选 · 框内拖动移动 · Delete 删 · Esc 取消
           </div>
           <div class="tool-divider"></div>
           <div class="tool-group">
@@ -174,18 +186,21 @@
             <span class="zoom-label mono">{{ Math.round(zoom * 100) }}%</span>
             <button class="tool-btn" title="放大 (+)" @click="zoomBy(1)">＋</button>
             <button class="tool-btn" title="适应窗口 (0)" @click="fitView">⊡</button>
+            <button class="tool-btn" :class="{ on: fullscreen }"
+                    :title="fullscreen ? '退出全屏 (F)' : '全屏画布 (F)'"
+                    @click="fullscreen = !fullscreen">⛶</button>
           </div>
           <div class="tool-divider"></div>
           <span class="grid-size mono">{{ grid.width }} × {{ grid.height }}</span>
           <span class="grid-size mono" title="按豆径换算的成品尺寸">
             ≈ {{ finishedSize }}
           </span>
-          <span class="kbd-hint" title="B 画笔 · E 橡皮 · G 魔棒画笔 · D 魔棒橡皮 · R 替换 · M 镜像复制 · I 取色 · H/空格 移动 · ⇧+滚轮 笔刷大小 · +/- 缩放 · 0 适应 · Ctrl+Z 撤销">⌨ 快捷键</span>
+          <span class="kbd-hint" title="B 画笔 · E 橡皮 · G 魔棒画笔 · D 魔棒橡皮 · R 替换 · M 镜像复制 · S 选区 · I 取色 · H/空格 移动 · F 全屏 · ⇧+滚轮 笔刷大小 · +/- 缩放 · 0 适应 · Ctrl+Z 撤销">⌨ 快捷键</span>
           <label class="export-opt" style="margin-left:auto;" title="在画布每颗豆上显示 MARD 色号">
             <input type="checkbox" v-model="showLabels" />
             <span>标色号</span>
           </label>
-          <button class="btn btn-ghost btn-sm" @click="showExportDialog = true">
+          <button class="btn btn-ghost btn-sm" @click="openExportDialog">
             ⬇ 导出
           </button>
           <button class="btn btn-ghost btn-sm" @click="showShopDialog = true">
@@ -198,12 +213,14 @@
           <label class="pb-cell pb-wide">
             <span class="pb-label">网格宽度 · {{ grid.width }}×{{ grid.height }}</span>
             <input type="range" min="16" max="180" step="1"
-                   v-model.number="gridWidth" class="slider" />
+                   v-model.number="gridWidth" class="slider"
+                   :disabled="algo === 'native'" />
           </label>
           <label class="pb-cell">
             <span class="pb-label">豆数</span>
             <input type="number" min="16" max="180"
-                   v-model.number="gridWidth" class="input" />
+                   v-model.number="gridWidth" class="input"
+                   :disabled="algo === 'native'" />
           </label>
           <label class="pb-cell">
             <span class="pb-label">算法</span>
@@ -300,6 +317,7 @@
           </div>
         </div>
       </div>
+      </Teleport>
 
       <!-- Side column -->
       <div class="side-col">
@@ -411,20 +429,24 @@
     </div>
   </div>
 
-  <!-- Export Dialog -->
+  <!-- Export Dialog (teleported above the fullscreen canvas in fullscreen mode) -->
+  <Teleport to="#app" :disabled="!fullscreen">
   <BeadExportDialog v-if="showExportDialog && grid"
     :grid="grid!" :bead-shape="beadShape" :total-beads="totalBeads"
-    :mard-colors="MARD_COLORS"
+    :mard-colors="MARD_COLORS" :preview="exportPreview"
     @close="showExportDialog = false"
     @export-png="handleExportPng"
     @export-jpg="handleExportJpg"
     @export-svg="handleExportSvg"
     @export-csv="handleExportCsv" />
+  </Teleport>
 
   <!-- Shop Dialog -->
+  <Teleport to="#app" :disabled="!fullscreen">
   <BeadShopDialog v-if="showShopDialog && grid"
     :used-colors="usedCodes" :mard-colors="MARD_COLORS"
     @close="showShopDialog = false" />
+  </Teleport>
 
   <!-- Custom palette picker -->
   <BeadPalettePicker v-if="showPalettePicker"
@@ -446,7 +468,7 @@ import {
   type Tier, type BeadColor,
 } from '../data/mardPalettes'
 import {
-  imageToGrid, countColors, paletteGaps, substituteFor, textOn,
+  imageToGrid, detectPixelArt, countColors, paletteGaps, substituteFor, textOn,
   ALGO_OPTIONS, MATCH_OPTIONS, type PerlerGrid, type ConvertAlgo, type MatchMetric,
 } from '../composables/usePerler'
 import BeadTabs from '../components/BeadTabs.vue'
@@ -454,7 +476,7 @@ import BeadExportDialog from '../components/BeadExportDialog.vue'
 import BeadShopDialog from '../components/BeadShopDialog.vue'
 import BeadPalettePicker from '../components/BeadPalettePicker.vue'
 
-type Tool = 'paint' | 'erase' | 'wand' | 'wanderase' | 'replace' | 'pick' | 'pan' | 'mirror'
+type Tool = 'paint' | 'erase' | 'wand' | 'wanderase' | 'replace' | 'pick' | 'pan' | 'mirror' | 'select'
 type BeadShape = 'circle' | 'square' | 'fill'
 
 // ---- state ----
@@ -501,6 +523,7 @@ const refFileInput = ref<HTMLInputElement | null>(null)
 const showExportDialog = ref(false)
 const showShopDialog = ref(false)
 const showPalettePicker = ref(false)
+const exportPreview = ref('')   // data-URL preview shown inside the export dialog
 
 // ---- undo / redo history ----
 interface GridSnap { width: number; height: number; cells: (string | null)[] }
@@ -522,6 +545,7 @@ const currentCode = ref('')
 const zoom = ref(1)
 const offset = ref({ x: 28, y: 28 })
 const hover = ref<{ x: number; y: number } | null>(null)
+const fullscreen = ref(false)   // canvas fills the whole viewport
 
 const tools: { id: Tool; icon: string; label: string; key: string }[] = [
   { id: 'paint',     icon: '🖌', label: '画笔', key: 'B' },
@@ -530,9 +554,20 @@ const tools: { id: Tool; icon: string; label: string; key: string }[] = [
   { id: 'wanderase', icon: '🧹', label: '魔棒橡皮', key: 'D' },
   { id: 'replace',   icon: '🔁', label: '同色替换', key: 'R' },
   { id: 'mirror',    icon: '🪞', label: '镜像复制', key: 'M' },
+  { id: 'select',    icon: '⬚', label: '选区移动', key: 'S' },
   { id: 'pick',      icon: '💉', label: '取色', key: 'I' },
   { id: 'pan',       icon: '✋', label: '移动', key: 'H' },
 ]
+
+// ---- rectangular selection (marquee + move) ----
+const selection = ref<{ x: number; y: number; w: number; h: number } | null>(null)
+let selMode: 'none' | 'create' | 'move' = 'none'
+let selAnchor: { x: number; y: number } | null = null    // create-drag start cell
+let selMoveStart: { x: number; y: number } | null = null // move-drag start cell (raw)
+let selBufOrigin: { x: number; y: number } | null = null // selection pos when lifted
+let selBuf: (string | null)[] | null = null              // lifted (floating) cells
+let selBufW = 0
+let selBufH = 0
 
 // mirror-copy axis configuration
 const mirrorAxis = ref<'v' | 'h'>('v')   // vertical or horizontal symmetry line
@@ -647,6 +682,19 @@ function loadFile(file: File) {
     img.onload = () => {
       sourceImg.value = img
       sourcePreview.value = String(reader.result)
+      // 像素画自动识别：本身就是像素画 → 切到「原图像素 1:1」原样导入；
+      // 否则若仍停留在 native 模式则切回普通算法。
+      const pa = detectPixelArt(img)
+      const wantAlgo: ConvertAlgo =
+        pa.isPixelArt ? 'native' : (algo.value === 'native' ? 'smooth' : algo.value)
+      if (wantAlgo !== algo.value) {
+        suppressReconv = true
+        algo.value = wantAlgo
+        nextTick(() => { suppressReconv = false })
+      }
+      if (pa.isPixelArt) {
+        ElMessage.success(`检测到像素画，已按原始 ${pa.nativeW}×${pa.nativeH} 像素 1:1 导入`)
+      }
       // 拖入 / 选择图片后立即转换成拼豆图纸（无论当前是空白画布还是已有图纸）
       convert(true)
     }
@@ -709,6 +757,8 @@ async function convert(refit = true) {
       for (const i of detectBackgroundCells(grid.value)) grid.value.cells[i] = null
     }
     gridVersion.value++
+    // 「原图像素」模式下网格尺寸由原图决定 —— 把宽度滑块同步过去
+    syncWidthFromGrid()
     if (refit) {
       // a fresh conversion from the button invalidates the edit history
       undoStack.length = 0
@@ -918,6 +968,16 @@ function cellAt(e: MouseEvent): { x: number; y: number } | null {
   const y = Math.floor((e.clientY - rect.top - RULER - offset.value.y) / cell)
   if (x < 0 || y < 0 || x >= g.width || y >= g.height) return null
   return { x, y }
+}
+
+/** Pointer → cell coordinate, unclamped (may be negative / beyond the grid). */
+function cellAtRaw(e: MouseEvent): { x: number; y: number } {
+  const rect = wrapRef.value!.getBoundingClientRect()
+  const cell = BASE_CELL * zoom.value
+  return {
+    x: Math.floor((e.clientX - rect.left - RULER - offset.value.x) / cell),
+    y: Math.floor((e.clientY - rect.top - RULER - offset.value.y) / cell),
+  }
 }
 
 // ---- undo / redo ----
@@ -1161,6 +1221,7 @@ function pointInXBox(p: { x: number; y: number }, b: XBox): boolean {
 function startTransform() {
   const g = grid.value
   if (!g || transforming.value) return
+  clearSelection()
   xW0 = g.width; xH0 = g.height
   xbox.value = {
     cx: g.width / 2, cy: g.height / 2,
@@ -1335,6 +1396,55 @@ function drawTransformBox(ctx: CanvasRenderingContext2D,
   }
 }
 
+/** Draw the floating (lifted) selection content while it is being moved. */
+function drawSelFloat(ctx: CanvasRenderingContext2D,
+                      cell: number, ox: number, oy: number) {
+  const s = selection.value
+  if (!s || !selBuf) return
+  for (let dy = 0; dy < selBufH; dy++) {
+    for (let dx = 0; dx < selBufW; dx++) {
+      const code = selBuf[dy * selBufW + dx]
+      if (!code) continue
+      drawBead(ctx, ox + (s.x + dx) * cell, oy + (s.y + dy) * cell, cell,
+               MARD_COLORS[code]?.hex || '#000', beadShape.value)
+    }
+  }
+}
+
+/** Draw the selection marquee rectangle + a size badge. */
+function drawMarquee(ctx: CanvasRenderingContext2D,
+                     cell: number, ox: number, oy: number) {
+  const s = selection.value
+  if (!s) return
+  const rx = ox + s.x * cell, ry = oy + s.y * cell
+  const rw = s.w * cell, rh = s.h * cell
+  ctx.save()
+  ctx.fillStyle = 'rgba(124,92,255,0.10)'
+  ctx.fillRect(rx, ry, rw, rh)
+  // two-tone dashed border ("marching ants" look)
+  ctx.lineWidth = 1.6
+  ctx.setLineDash([5, 3])
+  ctx.strokeStyle = '#ffffff'
+  ctx.lineDashOffset = 0
+  ctx.strokeRect(rx, ry, rw, rh)
+  ctx.strokeStyle = '#7c5cff'
+  ctx.lineDashOffset = 4
+  ctx.strokeRect(rx, ry, rw, rh)
+  ctx.restore()
+  // size badge inside the top-left corner
+  ctx.save()
+  ctx.font = 'bold 11px "JetBrains Mono", monospace'
+  const tag = `${s.w}×${s.h}`
+  const tw = ctx.measureText(tag).width + 12
+  ctx.fillStyle = 'rgba(124,92,255,0.92)'
+  ctx.fillRect(rx + 1, ry + 1, tw, 15)
+  ctx.fillStyle = '#fff'
+  ctx.textAlign = 'left'
+  ctx.textBaseline = 'middle'
+  ctx.fillText(tag, rx + 7, ry + 9)
+  ctx.restore()
+}
+
 // ---- editing / interaction ----
 let painting = false
 let panning = false
@@ -1458,6 +1568,141 @@ function applyTool(cell: { x: number; y: number }) {
   }
 }
 
+// ---- rectangular selection tool ----
+/** Is cell (x, y) inside the current selection rectangle? */
+function inSelection(x: number, y: number): boolean {
+  const s = selection.value
+  return !!s && x >= s.x && x < s.x + s.w && y >= s.y && y < s.y + s.h
+}
+
+/** Reset all selection state (does not repaint — callers render). */
+function clearSelection() {
+  if (selMode === 'move') commitSelMove()   // don't lose an in-progress move
+  selection.value = null
+  selMode = 'none'
+  selAnchor = null
+  selMoveStart = null
+  selBuf = null
+  selBufOrigin = null
+}
+
+function selectOnDown(e: MouseEvent) {
+  const g = grid.value
+  if (!g) return
+  const raw = cellAtRaw(e)
+  const cx = Math.max(0, Math.min(g.width - 1, raw.x))
+  const cy = Math.max(0, Math.min(g.height - 1, raw.y))
+  hover.value = null
+  if (selection.value && inSelection(cx, cy)) {
+    // press inside an existing selection → lift its cells to move them
+    const s = selection.value
+    selBufW = s.w
+    selBufH = s.h
+    selBuf = new Array(s.w * s.h)
+    for (let dy = 0; dy < s.h; dy++) {
+      for (let dx = 0; dx < s.w; dx++) {
+        const gx = s.x + dx, gy = s.y + dy
+        selBuf[dy * s.w + dx] =
+          (gx >= 0 && gx < g.width && gy >= 0 && gy < g.height)
+            ? g.cells[gy * g.width + gx] : null
+      }
+    }
+    selBufOrigin = { x: s.x, y: s.y }
+    selMoveStart = { x: raw.x, y: raw.y }
+    selMode = 'move'
+  } else {
+    // press elsewhere → start a fresh marquee
+    selAnchor = { x: cx, y: cy }
+    selection.value = { x: cx, y: cy, w: 1, h: 1 }
+    selBuf = null
+    selMode = 'create'
+  }
+  render()
+}
+
+function selectOnMove(e: MouseEvent) {
+  const g = grid.value
+  if (!g) return
+  const raw = cellAtRaw(e)
+  if (selMode === 'create' && selAnchor) {
+    const cx = Math.max(0, Math.min(g.width - 1, raw.x))
+    const cy = Math.max(0, Math.min(g.height - 1, raw.y))
+    selection.value = {
+      x: Math.min(selAnchor.x, cx),
+      y: Math.min(selAnchor.y, cy),
+      w: Math.abs(cx - selAnchor.x) + 1,
+      h: Math.abs(cy - selAnchor.y) + 1,
+    }
+    render()
+  } else if (selMode === 'move' && selMoveStart && selBufOrigin) {
+    selection.value = {
+      x: selBufOrigin.x + (raw.x - selMoveStart.x),
+      y: selBufOrigin.y + (raw.y - selMoveStart.y),
+      w: selBufW, h: selBufH,
+    }
+    render()
+  }
+}
+
+/** Stamp the lifted region into the grid at its new position. */
+function commitSelMove() {
+  const g = grid.value, s = selection.value
+  if (!g || !s || !selBuf || !selBufOrigin) return
+  if (s.x !== selBufOrigin.x || s.y !== selBufOrigin.y) {
+    pushHistory()
+    // clear the cells the region was lifted from
+    for (let dy = 0; dy < selBufH; dy++) {
+      for (let dx = 0; dx < selBufW; dx++) {
+        const ox = selBufOrigin.x + dx, oy = selBufOrigin.y + dy
+        if (ox >= 0 && ox < g.width && oy >= 0 && oy < g.height)
+          g.cells[oy * g.width + ox] = null
+      }
+    }
+    // drop the lifted block at the new position
+    for (let dy = 0; dy < selBufH; dy++) {
+      for (let dx = 0; dx < selBufW; dx++) {
+        const nx = s.x + dx, ny = s.y + dy
+        if (nx >= 0 && nx < g.width && ny >= 0 && ny < g.height)
+          g.cells[ny * g.width + nx] = selBuf[dy * selBufW + dx] ?? null
+      }
+    }
+    gridVersion.value++
+  }
+  selBuf = null
+  selBufOrigin = null
+  selMoveStart = null
+}
+
+/** Finish a select-tool drag (mouseup / leave). */
+function finishSelDrag() {
+  if (selMode === 'create') {
+    // a 1×1 marquee from a plain click acts as "deselect"
+    if (selection.value && selection.value.w === 1 && selection.value.h === 1)
+      selection.value = null
+  } else if (selMode === 'move') {
+    commitSelMove()
+  }
+  selMode = 'none'
+  selAnchor = null
+  render()
+}
+
+/** Clear the beads inside the current selection. */
+function deleteSelection() {
+  const g = grid.value, s = selection.value
+  if (!g || !s) return
+  pushHistory()
+  for (let dy = 0; dy < s.h; dy++) {
+    for (let dx = 0; dx < s.w; dx++) {
+      const x = s.x + dx, y = s.y + dy
+      if (x >= 0 && x < g.width && y >= 0 && y < g.height)
+        g.cells[y * g.width + x] = null
+    }
+  }
+  gridVersion.value++
+  render()
+}
+
 function onDown(e: MouseEvent) {
   if (transforming.value) { transformOnDown(e); return }
   if (tool.value === 'pan' || e.button === 1) {
@@ -1465,6 +1710,7 @@ function onDown(e: MouseEvent) {
     panStart = { x: e.clientX, y: e.clientY, ox: offset.value.x, oy: offset.value.y }
     return
   }
+  if (tool.value === 'select') { selectOnDown(e); return }
   const cell = cellAt(e)
   if (cell) {
     // snapshot once per action so Ctrl+Z reverts the whole stroke
@@ -1484,6 +1730,7 @@ function onMove(e: MouseEvent) {
     render()
     return
   }
+  if (selMode !== 'none') { selectOnMove(e); return }
   const cell = cellAt(e)
   hover.value = cell
   if (cell) {
@@ -1501,10 +1748,12 @@ function onMove(e: MouseEvent) {
 }
 function onUp() {
   if (transforming.value) { xDrag = null; return }
+  if (selMode !== 'none') { finishSelDrag(); return }
   painting = false; panning = false
 }
 function onLeave() {
   if (transforming.value) { xDrag = null; return }
+  if (selMode !== 'none') { finishSelDrag(); return }
   painting = false; panning = false; hover.value = null; render()
 }
 
@@ -1516,6 +1765,8 @@ function render() {
   const dpr = window.devicePixelRatio || 1
   const W = cv.width / dpr, H = cv.height / dpr
   const cell = BASE_CELL * zoom.value
+  const emptyMargin = cell * 0.3            // empty-cell marker inset
+  const emptySize = cell - emptyMargin * 2  // empty-cell marker side
   const ox = RULER + offset.value.x
   const oy = RULER + offset.value.y
 
@@ -1534,10 +1785,17 @@ function render() {
     for (let x = cx0; x < cx1; x++) {
       const code = g.cells[y * g.width + x]
       const px = ox + x * cell, py = oy + y * cell
-      if (!code) {
-        // empty / erased cell: neutral transparency checker (no bead here)
-        ctx.fillStyle = ((x + y) & 1) ? '#ffffff' : '#d4d0d8'
-        ctx.fillRect(px, py, cell, cell)
+      // while a selection is being moved, its source region reads as empty
+      const inHole = selMode === 'move' && selBufOrigin !== null
+        && x >= selBufOrigin.x && x < selBufOrigin.x + selBufW
+        && y >= selBufOrigin.y && y < selBufOrigin.y + selBufH
+      if (!code || inHole) {
+        // empty / erased cell: a small centered marker — clearly smaller than
+        // the cell, so empty cells stand apart from filled beads at a glance
+        if (emptySize >= 1.2) {
+          ctx.fillStyle = ((x + y) & 1) ? '#ddd6e0' : '#bfb6c6'
+          ctx.fillRect(px + emptyMargin, py + emptyMargin, emptySize, emptySize)
+        }
         continue
       }
       drawBead(ctx, px, py, cell, MARD_COLORS[code]?.hex || '#000', beadShape.value)
@@ -1601,6 +1859,12 @@ function render() {
     ctx.globalAlpha = refOpacity.value
     ctx.drawImage(refImg, ox, oy, g.width * cell, g.height * cell)
     ctx.restore()
+  }
+
+  // selection: floating move preview + marquee rectangle
+  if (selection.value && !transforming.value) {
+    if (selMode === 'move' && selBuf) drawSelFloat(ctx, cell, ox, oy)
+    drawMarquee(ctx, cell, ox, oy)
   }
 
   // free-transform preview
@@ -1711,12 +1975,13 @@ function drawBead(
 }
 
 // ---- export ----
-/** Generic canvas export (PNG / JPEG) — mirrors the current canvas state. */
-function exportImage(mime: 'png' | 'jpeg', quality?: number) {
-  const g = grid.value
-  if (!g) return
+/**
+ * Build the full export-style pattern canvas (beads + grid lines + ruler) at a
+ * given cell size. Shared by the PNG/JPEG export and the export-dialog preview.
+ */
+function buildPatternCanvas(cell: number): HTMLCanvasElement {
+  const g = grid.value!
   const labels = showLabels.value
-  const cell = labels ? 42 : 26
   const cv = document.createElement('canvas')
   cv.width = RULER + g.width * cell
   cv.height = RULER + g.height * cell
@@ -1724,19 +1989,24 @@ function exportImage(mime: 'png' | 'jpeg', quality?: number) {
   ctx.fillStyle = '#ffffff'
   ctx.fillRect(0, 0, cv.width, cv.height)
 
+  const emptyMargin = cell * 0.3            // empty-cell marker inset
+  const emptySize = cell - emptyMargin * 2  // empty-cell marker side
   for (let y = 0; y < g.height; y++) {
     for (let x = 0; x < g.width; x++) {
       const code = g.cells[y * g.width + x]
       const px = RULER + x * cell, py = RULER + y * cell
       if (!code) {
-        // empty cell: neutral transparency checker (no bead here)
-        ctx.fillStyle = ((x + y) & 1) ? '#ffffff' : '#d4d4d4'
-        ctx.fillRect(px, py, cell, cell)
+        // empty cell: a small centered marker, smaller than the cell so empty
+        // cells read clearly apart from filled beads
+        if (emptySize >= 1) {
+          ctx.fillStyle = ((x + y) & 1) ? '#ddd6e0' : '#bfb6c6'
+          ctx.fillRect(px + emptyMargin, py + emptyMargin, emptySize, emptySize)
+        }
         continue
       }
       const bc = MARD_COLORS[code]
       drawBead(ctx, px, py, cell, bc?.hex || '#000', beadShape.value)
-      if (labels && bc) {
+      if (labels && bc && cell >= 12) {
         ctx.fillStyle = textOn(bc.rgb)
         ctx.font = `bold ${Math.round(cell * 0.30)}px "JetBrains Mono", monospace`
         ctx.textAlign = 'center'
@@ -1766,25 +2036,35 @@ function exportImage(mime: 'png' | 'jpeg', quality?: number) {
     ctx.moveTo(RULER, RULER + y * cell); ctx.lineTo(cv.width, RULER + y * cell)
   }
   ctx.stroke()
-  // ruler numbers
+  // ruler numbers — stepped so small (preview) cells stay legible
+  const rstep = cell < 14 ? 10 : cell < 22 ? 5 : 1
   ctx.fillStyle = '#fff'
   ctx.fillRect(0, 0, cv.width, RULER)
   ctx.fillRect(0, 0, RULER, cv.height)
   ctx.font = '11px monospace'
   ctx.textBaseline = 'middle'
   for (let x = 0; x < g.width; x++) {
+    if (x % rstep) continue
     ctx.fillStyle = (x % 10 === 0) ? '#e8462a' : '#aaa'
     ctx.textAlign = 'center'
     ctx.fillText(String(x + 1), RULER + x * cell + cell / 2, RULER / 2)
   }
   for (let y = 0; y < g.height; y++) {
+    if (y % rstep) continue
     ctx.fillStyle = (y % 10 === 0) ? '#e8462a' : '#aaa'
     ctx.textAlign = 'right'
     ctx.fillText(String(y + 1), RULER - 4, RULER + y * cell + cell / 2)
   }
   ctx.fillStyle = '#fff'
   ctx.fillRect(0, 0, RULER, RULER)
+  return cv
+}
 
+/** Generic canvas export (PNG / JPEG) — mirrors the current canvas state. */
+function exportImage(mime: 'png' | 'jpeg', quality?: number) {
+  const g = grid.value
+  if (!g) return
+  const cv = buildPatternCanvas(showLabels.value ? 42 : 26)
   const ext = mime === 'jpeg' ? 'jpg' : 'png'
   const mimeType = mime === 'jpeg' ? 'image/jpeg' : 'image/png'
   const a = document.createElement('a')
@@ -1792,6 +2072,21 @@ function exportImage(mime: 'png' | 'jpeg', quality?: number) {
   a.href = cv.toDataURL(mimeType, quality)
   a.click()
   ElMessage.success('图纸已导出')
+}
+
+/** Render a scaled-down data-URL preview of the exported pattern. */
+function buildPreview(): string {
+  const g = grid.value
+  if (!g) return ''
+  const pc = Math.max(4, Math.min(30, Math.round(900 / Math.max(g.width, g.height))))
+  return buildPatternCanvas(pc).toDataURL('image/png')
+}
+
+/** Open the export dialog, generating a fresh preview first. */
+function openExportDialog() {
+  if (!grid.value) return
+  exportPreview.value = buildPreview()
+  showExportDialog.value = true
 }
 
 /** Export as SVG vector — mirrors the current canvas state. */
@@ -1906,6 +2201,16 @@ function onKeyDown(e: KeyboardEvent) {
     return
   }
 
+  // selection: Delete clears the region, Escape deselects
+  if ((e.key === 'Delete' || e.key === 'Backspace')
+      && tool.value === 'select' && selection.value) {
+    e.preventDefault(); deleteSelection(); return
+  }
+  if (e.key === 'Escape') {
+    if (selection.value) { e.preventDefault(); clearSelection(); render(); return }
+    if (fullscreen.value) { e.preventDefault(); fullscreen.value = false; return }
+  }
+
   // undo / redo
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
     e.preventDefault()
@@ -1924,8 +2229,10 @@ function onKeyDown(e: KeyboardEvent) {
     case 'd': tool.value = 'wanderase'; break
     case 'r': tool.value = 'replace'; break
     case 'm': tool.value = 'mirror'; break
+    case 's': tool.value = 'select'; break
     case 'i': tool.value = 'pick'; break
     case 'h': tool.value = 'pan'; break
+    case 'f': fullscreen.value = !fullscreen.value; break
     case ' ':
       e.preventDefault()
       if (tool.value !== 'pan') { panBeforeSpace = tool.value; tool.value = 'pan' }
@@ -1971,6 +2278,20 @@ watch(tier, () => {
     currentCode.value = workingPalette.value[0]?.code || ''
   }
 })
+
+// Toggling fullscreen resizes the canvas container — re-fit after the DOM updates.
+watch(fullscreen, () => {
+  nextTick(() => { syncCanvasSize(); fitView() })
+})
+
+// Leaving the selection tool drops any active selection.
+watch(tool, (nv, ov) => {
+  if (ov === 'select' && nv !== 'select') { clearSelection(); render() }
+})
+
+// Any structural grid change (convert / undo / flip / transform …) invalidates
+// the selection, since its coordinates may no longer be in bounds.
+watch(grid, () => { clearSelection(); render() })
 </script>
 
 <style scoped>
@@ -2022,6 +2343,23 @@ watch(tier, () => {
 @media (max-width: 1000px) { .workspace { grid-template-columns: 1fr; } }
 
 .canvas-col { padding: 0; overflow: hidden; }
+
+/* fullscreen canvas — teleported to <body>, covers the whole viewport */
+.canvas-col.fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  margin: 0;
+  border-radius: 0;
+  transform: none;
+  display: flex;
+  flex-direction: column;
+}
+.canvas-col.fullscreen .canvas-wrap {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+}
 
 .toolbar {
   display: flex;
