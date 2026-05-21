@@ -82,7 +82,13 @@
         </div>
       </header>
 
-      <router-view />
+      <!-- BeadStudio is kept alive so the canvas / edits survive
+           navigating to the MARD palette tab and back -->
+      <router-view v-slot="{ Component }">
+        <keep-alive :include="['BeadStudio']">
+          <component :is="Component" />
+        </keep-alive>
+      </router-view>
     </main>
 
     <!-- Floating rocket scroll buttons -->

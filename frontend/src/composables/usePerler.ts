@@ -11,12 +11,13 @@ export interface PerlerGrid {
 }
 
 /** Pixelation algorithms. */
-export type ConvertAlgo = 'smooth' | 'avg' | 'sharp' | 'floyd' | 'atkinson' | 'bayer'
+export type ConvertAlgo = 'smooth' | 'avg' | 'sharp' | 'slic' | 'floyd' | 'atkinson' | 'bayer'
 
 export const ALGO_OPTIONS: { id: ConvertAlgo; label: string; desc: string }[] = [
   { id: 'smooth',   label: '平滑取色',       desc: '双线性缩放后最近邻匹配，适合照片' },
   { id: 'avg',      label: '区域平均',        desc: '四倍中间帧降采样取均值，颜色过渡更柔和' },
   { id: 'sharp',    label: '锐利像素',        desc: '边缘保留降采样，线条与轮廓清晰不丢失，适合像素图/线稿/Logo' },
+  { id: 'slic',     label: 'SLIC 像素',      desc: 'SLIC 超像素聚类，相似区域合并为干净色块，扁平像素画风' },
   { id: 'floyd',    label: '抖动 · Floyd',   desc: 'Floyd-Steinberg 误差扩散，渐变更细腻' },
   { id: 'atkinson', label: '抖动 · Atkinson', desc: 'Atkinson 抖动，轮廓清晰，颗粒感弱' },
   { id: 'bayer',    label: '抖动 · Bayer',   desc: '有序抖动，规则颗粒感，复古风格' },
@@ -275,6 +276,107 @@ export function imageToGrid(
         }
         cells[cell] = nearestColor(r, g, b, palette, metric).code
       }
+    }
+    return { width: w, height: h, cells }
+  }
+
+  // ---- slic: SLIC superpixel clustering ----
+  // Cluster cells into superpixels in CIELAB+xy space, then flatten each
+  // superpixel to one averaged color. Merges similar regions into clean flat
+  // patches — a tidy, poster-like pixel-art look.
+  if (algo === 'slic') {
+    const cv = document.createElement('canvas')
+    cv.width = w
+    cv.height = h
+    const ctx = cv.getContext('2d', { willReadFrequently: true })!
+    ctx.imageSmoothingEnabled = true
+    ctx.imageSmoothingQuality = 'high'
+    ctx.clearRect(0, 0, w, h)
+    ctx.drawImage(img, 0, 0, w, h)
+    const data = ctx.getImageData(0, 0, w, h).data
+    const N = w * h
+
+    // per-cell CIELAB + opacity
+    const labL = new Float32Array(N), labA = new Float32Array(N), labB = new Float32Array(N)
+    const opaque = new Uint8Array(N)
+    for (let i = 0; i < N; i++) {
+      if (data[i * 4 + 3] < 128) continue
+      opaque[i] = 1
+      const lab = rgb2lab(data[i * 4], data[i * 4 + 1], data[i * 4 + 2])
+      labL[i] = lab[0]; labA[i] = lab[1]; labB[i] = lab[2]
+    }
+
+    const S = 3                       // superpixel grid step (cells)
+    const m = 12                      // compactness (color vs. shape balance)
+    const spatial = (m * m) / (S * S) // weight of the xy term
+
+    // init cluster centers on a regular grid
+    const cL: number[] = [], cA: number[] = [], cB: number[] = [], cX: number[] = [], cY: number[] = []
+    for (let cy = (S >> 1); cy < h; cy += S) {
+      for (let cx = (S >> 1); cx < w; cx += S) {
+        const i = cy * w + cx
+        cL.push(labL[i]); cA.push(labA[i]); cB.push(labB[i]); cX.push(cx); cY.push(cy)
+      }
+    }
+    const K = cL.length
+    const label = new Int32Array(N).fill(-1)
+    const dist = new Float32Array(N)
+
+    for (let iter = 0; iter < 10; iter++) {
+      dist.fill(Infinity)
+      for (let k = 0; k < K; k++) {
+        const kx = cX[k], ky = cY[k]
+        const x0 = Math.max(0, Math.floor(kx - S)), x1 = Math.min(w - 1, Math.ceil(kx + S))
+        const y0 = Math.max(0, Math.floor(ky - S)), y1 = Math.min(h - 1, Math.ceil(ky + S))
+        for (let y = y0; y <= y1; y++) {
+          for (let x = x0; x <= x1; x++) {
+            const i = y * w + x
+            if (!opaque[i]) continue
+            const dl = labL[i] - cL[k], da = labA[i] - cA[k], db = labB[i] - cB[k]
+            const dx = x - kx, dy = y - ky
+            const D = dl * dl + da * da + db * db + (dx * dx + dy * dy) * spatial
+            if (D < dist[i]) { dist[i] = D; label[i] = k }
+          }
+        }
+      }
+      // recompute centers as the mean of their assigned cells
+      const sL = new Float64Array(K), sA = new Float64Array(K), sB = new Float64Array(K)
+      const sX = new Float64Array(K), sY = new Float64Array(K), cnt = new Int32Array(K)
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const i = y * w + x
+          const k = label[i]
+          if (k < 0) continue
+          sL[k] += labL[i]; sA[k] += labA[i]; sB[k] += labB[i]
+          sX[k] += x; sY[k] += y; cnt[k]++
+        }
+      }
+      for (let k = 0; k < K; k++) {
+        if (!cnt[k]) continue
+        cL[k] = sL[k] / cnt[k]; cA[k] = sA[k] / cnt[k]; cB[k] = sB[k] / cnt[k]
+        cX[k] = sX[k] / cnt[k]; cY[k] = sY[k] / cnt[k]
+      }
+    }
+
+    // each superpixel → its mean RGB → nearest bead color
+    const sR = new Float64Array(K), sG = new Float64Array(K), sBl = new Float64Array(K), cn = new Int32Array(K)
+    for (let i = 0; i < N; i++) {
+      const k = label[i]
+      if (k < 0) continue
+      sR[k] += data[i * 4]; sG[k] += data[i * 4 + 1]; sBl[k] += data[i * 4 + 2]; cn[k]++
+    }
+    const clusterCode: (string | null)[] = new Array(K)
+    for (let k = 0; k < K; k++) {
+      clusterCode[k] = cn[k]
+        ? nearestColor(sR[k] / cn[k], sG[k] / cn[k], sBl[k] / cn[k], palette, metric).code
+        : null
+    }
+    for (let i = 0; i < N; i++) {
+      if (!opaque[i]) { cells[i] = null; continue }
+      const k = label[i]
+      cells[i] = k >= 0
+        ? clusterCode[k]
+        : nearestColor(data[i * 4], data[i * 4 + 1], data[i * 4 + 2], palette, metric).code
     }
     return { width: w, height: h, cells }
   }

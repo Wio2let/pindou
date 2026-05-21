@@ -42,13 +42,17 @@
 入口：左侧导航「🧩 拼豆」，两个 tab —— 拼豆工坊(`/bead-studio`) / MARD 色卡(`/bead-studio/cards`)。
 
 - `frontend/src/views/BeadStudio.vue` — 图片转拼豆图纸 + 编辑器（纯前端 Canvas）。
+  被 `App.vue` 的 `<keep-alive :include="['BeadStudio']">` 缓存——切到 MARD 色卡
+  再切回来画布/编辑不丢失；故全局监听必须用 `onActivated`/`onDeactivated`
+  收发（不能用 `onMounted`/`onBeforeUnmount`），组件需显式 `name: 'BeadStudio'`。
 - `frontend/src/views/MardCards.vue` — MARD 色卡浏览（8 档套装：24/48/72/96/120/144/216/264）。
 - `frontend/src/components/BeadPalettePicker.vue` — 自定义色板选择弹窗
   （全部色号方块、按 A/B/C… 系列分类、可勾选）。
 - `frontend/src/components/BeadExportDialog.vue` — 导出弹窗（只选格式，样式跟随画布）。
-- `frontend/src/composables/usePerler.ts` — 转换逻辑：6 种生成算法
-  (smooth/avg/sharp/floyd/atkinson/bayer)、4 种平替算法 (lab/weighted/hue/luma)。
+- `frontend/src/composables/usePerler.ts` — 转换逻辑：7 种生成算法
+  (smooth/avg/sharp/slic/floyd/atkinson/bayer)、4 种平替算法 (lab/weighted/hue/luma)。
   `sharp` 为边缘保留降采样（高分辨率重采样 + 暗簇优先，保轮廓）；
+  `slic` 为 SLIC 超像素聚类（CIELAB+xy 空间，相似区域合并为扁平色块）；
   `lab` 为默认平替：CIELAB ΔE94 感知匹配（渐变丝滑、惩罚去饱和避免混杂）。
 - `frontend/src/data/mardPalettes.ts` — **MARD 官方色卡数据（263 色）**。
   A~M 九系为标准盒、P/Q/R/T/Y 五系为追加色（共 14 系）。
@@ -59,19 +63,28 @@
   更新色卡只需整体替换本文件，其余功能按色号工作。
 - `frontend/src/data/pixelPalettes.ts` — **已废弃**（像素风格色板，已无引用，可删）。
 - 已实现：
-  - 转换：实时调网格大小、6 生成算法 + 4 平替算法（默认 `lab` 丝滑匹配）。
-  - 空白画布：不导入图片，按宽×高「新建空白画布」直接手绘。
+  - 转换：7 生成算法 + 4 平替算法（默认 `lab` 丝滑匹配）。拖入/选择图片
+    （上传区或画布上拖放皆可）会**自动转换**；改宽度/算法/色板从原图重新
+    量化生成（防抖）；自动重生成前会 `pushHistory`，故 **可 Ctrl+Z 撤销回
+    上一次设置**（撤销会同步宽度滑块，`suppressReconv` 防其再触发转换）。
+    「🔄 重新转换」按钮则是不可撤销的全新转换。
+  - 空白画布：不导入图片，按宽×高「新建空白画布」直接手绘；无源图时改
+    网格宽度＝对当前画布做最近邻重采样缩放（`resampleGrid`，可撤销）。
+  - 一键描边：沿图案外缘补一圈「当前色」（空格中与图案相邻的格变描边色）。
+  - 一键去背景：从四边洪水填充，清除与边缘相连、接近主导边缘色的格子
+    （`removeBackground`，连通性 + RGB 容差，适合背景较干净的图）。
   - 色板模式：套装色板（8 档）/ 我的色板（自定义，`localStorage` 持久化，
     可从色卡弹窗勾选或从图纸导入）。
-  - 编辑工具：画笔 / 橡皮 / 同色替换 / 镜像复制 / 取色 / 移动。
+  - 编辑工具：画笔 / 橡皮 / 魔棒画笔 / 魔棒橡皮 / 同色替换 / 镜像复制 / 取色 / 移动。
     画笔与橡皮为**圆形**，按 **Shift+滚轮**调大小。
+    魔棒画笔/橡皮 = 洪水填充点击处相连同色区域为当前色 / 清空。
     镜像复制 = 选竖/横对称轴 + 方向，点击即把一侧镜像到另一侧。
   - 变换：左右镜像 / 上下翻转 / **自由变换**（PS 式 Ctrl+T，8 手柄缩放 +
     任意角度旋转 + 平移，确认后重采样；撤销系统为完整快照支持尺寸变化）。
   - 豆型(圆/方/填满)、豆径(2.6/3/5mm)成品尺寸、撤销重做。
-  - 快捷键：B 画笔 / E 橡皮 / R 替换 / M 镜像 / I 取色 / H·空格 移动 /
-    Shift+滚轮 笔刷大小 / +- 缩放 / 0 适应 / Ctrl+Z 撤销 /
-    变换中 Enter 应用·Esc 取消。
+  - 快捷键：B 画笔 / E 橡皮 / G 魔棒画笔 / D 魔棒橡皮 / R 替换 / M 镜像 /
+    I 取色 / H·空格 移动 / Shift+滚轮 笔刷大小 / +- 缩放 / 0 适应 /
+    Ctrl+Z 撤销 / 变换中 Enter 应用·Esc 取消。
   - 「标色号」勾选后**实时**在画布每颗豆上显示色号。
   - 导出 PNG/JPG/SVG/CSV —— 所见即所得，跟随画布当前豆型与标色号，无镜像选项。
   - 缺色对比(缺色→平替)。

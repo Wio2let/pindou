@@ -151,6 +151,14 @@
             <span class="cur-swatch" :style="{ background: curColorHex }"></span>
             <span class="cur-label mono">{{ currentCode || '—' }}</span>
           </div>
+          <button class="btn btn-ghost btn-sm" @click="outlineShape"
+                  title="一键描边：沿图案外缘描一圈「当前色」（先在调色板选好颜色）">
+            🖍 描边
+          </button>
+          <button class="btn btn-ghost btn-sm" @click="removeBackground"
+                  title="一键去背景：从图纸四边洪水填充，清除与边缘相连、接近背景色的格子">
+            ✂️ 去背景
+          </button>
           <div class="tool-divider"></div>
           <div class="tool-group">
             <button class="tool-btn" title="缩小 (-)" @click="zoomBy(-1)">－</button>
@@ -163,7 +171,7 @@
           <span class="grid-size mono" title="按豆径换算的成品尺寸">
             ≈ {{ finishedSize }}
           </span>
-          <span class="kbd-hint" title="B 画笔 · E 橡皮 · R 替换 · M 镜像复制 · I 取色 · H/空格 移动 · ⇧+滚轮 笔刷大小 · +/- 缩放 · 0 适应 · Ctrl+Z 撤销">⌨ 快捷键</span>
+          <span class="kbd-hint" title="B 画笔 · E 橡皮 · G 魔棒画笔 · D 魔棒橡皮 · R 替换 · M 镜像复制 · I 取色 · H/空格 移动 · ⇧+滚轮 笔刷大小 · +/- 缩放 · 0 适应 · Ctrl+Z 撤销">⌨ 快捷键</span>
           <label class="export-opt" style="margin-left:auto;" title="在画布每颗豆上显示 MARD 色号">
             <input type="checkbox" v-model="showLabels" />
             <span>标色号</span>
@@ -223,7 +231,7 @@
             </div>
           </label>
           <span class="pb-hint" :class="{ busy: converting }">
-            {{ converting ? '重新生成中…' : '调整后自动重新生成（手绘修改会被覆盖）' }}
+            {{ converting ? '重新生成中…' : '改宽度/算法/色板会从原图重新生成 · 可 Ctrl+Z 撤销' }}
           </span>
         </div>
 
@@ -267,7 +275,9 @@
              @mousedown="onDown"
              @mousemove="onMove"
              @mouseup="onUp"
-             @mouseleave="onLeave">
+             @mouseleave="onLeave"
+             @dragover.prevent
+             @drop.prevent="onDrop">
           <canvas ref="canvasRef"></canvas>
           <div v-if="hoverTip && !transforming" class="hover-tip" :style="hoverTipStyle">
             {{ hoverTip }}
@@ -414,8 +424,13 @@
     @close="showPalettePicker = false" />
 </template>
 
+<script lang="ts">
+// explicit name so <keep-alive :include="['BeadStudio']"> matches this view
+export default { name: 'BeadStudio' }
+</script>
+
 <script setup lang="ts">
-import { ref, computed, shallowRef, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import { ref, computed, shallowRef, onBeforeUnmount, onActivated, onDeactivated, watch, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   MARD_COLORS, MARD_TIERS, TIER_LABELS, TIER_ORDER, MARD_GROUPS,
@@ -430,7 +445,7 @@ import BeadExportDialog from '../components/BeadExportDialog.vue'
 import BeadShopDialog from '../components/BeadShopDialog.vue'
 import BeadPalettePicker from '../components/BeadPalettePicker.vue'
 
-type Tool = 'paint' | 'erase' | 'replace' | 'pick' | 'pan' | 'mirror'
+type Tool = 'paint' | 'erase' | 'wand' | 'wanderase' | 'replace' | 'pick' | 'pan' | 'mirror'
 type BeadShape = 'circle' | 'square' | 'fill'
 
 // ---- state ----
@@ -499,12 +514,14 @@ const offset = ref({ x: 28, y: 28 })
 const hover = ref<{ x: number; y: number } | null>(null)
 
 const tools: { id: Tool; icon: string; label: string; key: string }[] = [
-  { id: 'paint',   icon: '🖌', label: '画笔', key: 'B' },
-  { id: 'erase',   icon: '🧽', label: '橡皮', key: 'E' },
-  { id: 'replace', icon: '🔁', label: '同色替换', key: 'R' },
-  { id: 'mirror',  icon: '🪞', label: '镜像复制', key: 'M' },
-  { id: 'pick',    icon: '💉', label: '取色', key: 'I' },
-  { id: 'pan',     icon: '✋', label: '移动', key: 'H' },
+  { id: 'paint',     icon: '🖌', label: '画笔', key: 'B' },
+  { id: 'erase',     icon: '🧽', label: '橡皮', key: 'E' },
+  { id: 'wand',      icon: '🪄', label: '魔棒画笔', key: 'G' },
+  { id: 'wanderase', icon: '🧹', label: '魔棒橡皮', key: 'D' },
+  { id: 'replace',   icon: '🔁', label: '同色替换', key: 'R' },
+  { id: 'mirror',    icon: '🪞', label: '镜像复制', key: 'M' },
+  { id: 'pick',      icon: '💉', label: '取色', key: 'I' },
+  { id: 'pan',       icon: '✋', label: '移动', key: 'H' },
 ]
 
 // mirror-copy axis configuration
@@ -620,6 +637,8 @@ function loadFile(file: File) {
     img.onload = () => {
       sourceImg.value = img
       sourcePreview.value = String(reader.result)
+      // 拖入 / 选择图片后立即转换成拼豆图纸（无论当前是空白画布还是已有图纸）
+      convert(true)
     }
     img.onerror = () => ElMessage.error('图片解码失败')
     img.src = String(reader.result)
@@ -664,6 +683,10 @@ async function convert(refit = true) {
     if (refit) ElMessage.warning('当前色板为空，请先添加颜色或切换到套装色板')
     return
   }
+  // A live re-convert (width / algorithm / palette tweak) snapshots the
+  // current grid so Ctrl+Z returns to the previous setting.
+  // A button conversion (refit) starts fresh, discarding edit history.
+  if (!refit && grid.value) pushHistory()
   converting.value = true
   await nextTick()
   try {
@@ -672,9 +695,11 @@ async function convert(refit = true) {
       algo.value, matchMetric.value,
     )
     gridVersion.value++
-    // a fresh grid invalidates the edit history
-    undoStack.length = 0
-    redoStack.length = 0
+    if (refit) {
+      // a fresh conversion from the button invalidates the edit history
+      undoStack.length = 0
+      redoStack.length = 0
+    }
     histVer.value++
     // default paint color = most-used color
     const first = [...countColors(grid.value).entries()].sort((a, b) => b[1] - a[1])[0]
@@ -714,13 +739,50 @@ function newBlankGrid() {
   nextTick(() => { syncCanvasSize(); fitView() })
 }
 
-// Live re-convert while editing — board sizes vary, so width / algorithm /
-// palette can all be tweaked in real time. Debounced; keeps zoom & pan.
+/** Nearest-neighbour resample of the current grid to a new size. */
+function resampleGrid(newW: number, newH: number) {
+  const g = grid.value
+  if (!g) return
+  newW = Math.max(1, Math.round(newW))
+  newH = Math.max(1, Math.round(newH))
+  if (newW === g.width && newH === g.height) return
+  const cells: (string | null)[] = new Array(newW * newH)
+  for (let y = 0; y < newH; y++) {
+    const sy = Math.min(g.height - 1, Math.floor(y * g.height / newH))
+    for (let x = 0; x < newW; x++) {
+      const sx = Math.min(g.width - 1, Math.floor(x * g.width / newW))
+      cells[y * newW + x] = g.cells[sy * g.width + sx]
+    }
+  }
+  grid.value = { width: newW, height: newH, cells }
+  gridVersion.value++
+}
+
+// Tweaking width / algorithm / palette re-converts from the source image
+// (debounced, undoable — convert() snapshots the previous grid first).
+// For a blank / hand-drawn canvas (no source image) a width change instead
+// resizes the current grid by resampling it.
+// `suppressReconv` blocks the watch while undo/redo syncs the width slider.
+let suppressReconv = false
 let reconvTimer: number | undefined
-watch([gridWidth, algo, tier, matchMetric, palMode, myPaletteCodes], () => {
-  if (!grid.value || !sourceImg.value || transforming.value) return
+watch([gridWidth, algo, tier, matchMetric, palMode, myPaletteCodes], (nv, ov) => {
+  if (suppressReconv || !grid.value || transforming.value) return
   if (reconvTimer) clearTimeout(reconvTimer)
-  reconvTimer = window.setTimeout(() => convert(false), 240)
+  if (sourceImg.value) {
+    // image-based grid → re-quantize from the source
+    reconvTimer = window.setTimeout(() => convert(false), 240)
+  } else if (nv[0] !== ov[0]) {
+    // blank / hand-drawn canvas → width change resizes (resamples) the grid
+    reconvTimer = window.setTimeout(() => {
+      const g = grid.value
+      if (!g) return
+      const nw = Math.max(1, Math.round(gridWidth.value))
+      if (nw === g.width) return
+      pushHistory()
+      resampleGrid(nw, Math.max(1, Math.round(nw * g.height / g.width)))
+      render()
+    }, 240)
+  }
 })
 
 // Persist custom palette to localStorage
@@ -856,10 +918,21 @@ function pushHistory() {
   redoStack.length = 0
   histVer.value++
 }
+// keep the width slider in sync with a restored snapshot, without the
+// change re-triggering an image re-conversion
+function syncWidthFromGrid() {
+  const g = grid.value
+  if (g && gridWidth.value !== g.width) {
+    suppressReconv = true
+    gridWidth.value = g.width
+    nextTick(() => { suppressReconv = false })
+  }
+}
 function undo() {
   if (!grid.value || !undoStack.length) return
   redoStack.push(snapGrid())
   grid.value = undoStack.pop()!
+  syncWidthFromGrid()
   gridVersion.value++
   histVer.value++
   nextTick(() => { syncCanvasSize(); render() })
@@ -868,6 +941,7 @@ function redo() {
   if (!grid.value || !redoStack.length) return
   undoStack.push(snapGrid())
   grid.value = redoStack.pop()!
+  syncWidthFromGrid()
   gridVersion.value++
   histVer.value++
   nextTick(() => { syncCanvasSize(); render() })
@@ -900,6 +974,100 @@ function flipV() {
   gridVersion.value++
   render()
 }
+
+// ---- one-click outline ----
+// Wrap the drawn shape in a 1-cell border of the currently-selected color:
+// every empty cell touching a filled cell (8-neighbourhood) becomes outline.
+function outlineShape() {
+  const g = grid.value
+  if (!g) return
+  if (!currentCode.value) {
+    ElMessage.warning('请先在右侧调色板选择描边颜色')
+    return
+  }
+  const w = g.width, h = g.height
+  const mark: number[] = []
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const idx = y * w + x
+      if (g.cells[idx] !== null) continue        // only empty cells become outline
+      let adj = false
+      for (let dy = -1; dy <= 1 && !adj; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          if (!dx && !dy) continue
+          const nx = x + dx, ny = y + dy
+          if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue
+          if (g.cells[ny * w + nx] !== null) { adj = true; break }
+        }
+      }
+      if (adj) mark.push(idx)
+    }
+  }
+  if (!mark.length) {
+    ElMessage.info('没有可描边的边缘（图纸为空或已填满）')
+    return
+  }
+  pushHistory()
+  for (const idx of mark) g.cells[idx] = currentCode.value
+  gridVersion.value++
+  render()
+  ElMessage.success(`已描边 ${mark.length} 颗豆`)
+}
+
+// ---- one-click background removal ----
+// Flood-fill inward from all four edges, clearing cells whose color is close
+// to the dominant border color. Identifies the subject by what's left.
+// Works best on photos / stickers with a relatively uniform background.
+function removeBackground() {
+  const g = grid.value
+  if (!g) return
+  const w = g.width, h = g.height
+  // dominant border code = the background color
+  const borderCount = new Map<string, number>()
+  const tally = (code: string | null) => {
+    if (code) borderCount.set(code, (borderCount.get(code) || 0) + 1)
+  }
+  for (let x = 0; x < w; x++) { tally(g.cells[x]); tally(g.cells[(h - 1) * w + x]) }
+  for (let y = 0; y < h; y++) { tally(g.cells[y * w]); tally(g.cells[y * w + w - 1]) }
+  let bgCode = '', bgN = 0
+  for (const [code, n] of borderCount) if (n > bgN) { bgN = n; bgCode = code }
+  const bg = bgCode ? MARD_COLORS[bgCode] : null
+  if (!bg) { ElMessage.info('未检测到背景色（图纸四边为空）'); return }
+  // a cell is "background" if its color is close enough to the border color
+  const TOL = 11000   // ≈ 60 / channel, sum of squared RGB difference
+  const isBg = (i: number): boolean => {
+    const code = g.cells[i]
+    if (!code) return false
+    const c = MARD_COLORS[code]
+    if (!c) return false
+    const dr = c.rgb[0] - bg.rgb[0], dgr = c.rgb[1] - bg.rgb[1], db = c.rgb[2] - bg.rgb[2]
+    return dr * dr + dgr * dgr + db * db <= TOL
+  }
+  // flood inward from every border cell — only edge-connected background goes
+  const visited = new Uint8Array(w * h)
+  const stack: number[] = []
+  const seed = (i: number) => { if (!visited[i]) { visited[i] = 1; stack.push(i) } }
+  for (let x = 0; x < w; x++) { seed(x); seed((h - 1) * w + x) }
+  for (let y = 0; y < h; y++) { seed(y * w); seed(y * w + w - 1) }
+  const removed: number[] = []
+  while (stack.length) {
+    const i = stack.pop()!
+    if (!isBg(i)) continue
+    removed.push(i)
+    const x = i % w, y = (i / w) | 0
+    if (x + 1 < w) seed(i + 1)
+    if (x - 1 >= 0) seed(i - 1)
+    if (y + 1 < h) seed(i + w)
+    if (y - 1 >= 0) seed(i - w)
+  }
+  if (!removed.length) { ElMessage.info('未检测到可去除的背景'); return }
+  pushHistory()
+  for (const i of removed) g.cells[i] = null
+  gridVersion.value++
+  render()
+  ElMessage.success(`已去除背景 ${removed.length} 颗豆`)
+}
+
 // ---- free transform (PS-style Ctrl+T) ----
 interface XBox { cx: number; cy: number; halfW: number; halfH: number; angle: number }
 const transforming = ref(false)
@@ -1202,6 +1370,24 @@ function mirrorCopy(cell: { x: number; y: number }) {
   render()
 }
 
+/** Flood-fill the contiguous same-value region starting at (sx, sy). */
+function floodFill(g: PerlerGrid, sx: number, sy: number,
+                   target: string | null, repl: string | null) {
+  if (target === repl) return
+  const w = g.width, h = g.height
+  const stack = [sy * w + sx]
+  while (stack.length) {
+    const i = stack.pop()!
+    if (g.cells[i] !== target) continue
+    g.cells[i] = repl
+    const x = i % w, y = (i / w) | 0
+    if (x + 1 < w) stack.push(i + 1)
+    if (x - 1 >= 0) stack.push(i - 1)
+    if (y + 1 < h) stack.push(i + w)
+    if (y - 1 >= 0) stack.push(i - w)
+  }
+}
+
 function applyTool(cell: { x: number; y: number }) {
   const g = grid.value
   if (!g) return
@@ -1213,6 +1399,21 @@ function applyTool(cell: { x: number; y: number }) {
     render()
   } else if (tool.value === 'erase') {
     stampBlock(g, cell.x, cell.y, eraserSize.value, null)
+    gridVersion.value++
+    render()
+  } else if (tool.value === 'wand') {
+    // 魔棒画笔：把点击处相连的同色区域整片填成当前色
+    if (!currentCode.value) return
+    const target = g.cells[idx]
+    if (target === currentCode.value) return
+    floodFill(g, cell.x, cell.y, target, currentCode.value)
+    gridVersion.value++
+    render()
+  } else if (tool.value === 'wanderase') {
+    // 魔棒橡皮：把点击处相连的同色区域整片擦除
+    const target = g.cells[idx]
+    if (target === null) return
+    floodFill(g, cell.x, cell.y, target, null)
     gridVersion.value++
     render()
   } else if (tool.value === 'replace') {
@@ -1244,7 +1445,7 @@ function onDown(e: MouseEvent) {
   if (cell) {
     // snapshot once per action so Ctrl+Z reverts the whole stroke
     // (mirror does its own pushHistory inside mirrorCopy)
-    if (['paint', 'erase', 'replace'].includes(tool.value)) pushHistory()
+    if (['paint', 'erase', 'wand', 'wanderase', 'replace'].includes(tool.value)) pushHistory()
     painting = true
     applyTool(cell)
   }
@@ -1695,6 +1896,8 @@ function onKeyDown(e: KeyboardEvent) {
   switch (e.key.toLowerCase()) {
     case 'b': tool.value = 'paint'; break
     case 'e': tool.value = 'erase'; break
+    case 'g': tool.value = 'wand'; break
+    case 'd': tool.value = 'wanderase'; break
     case 'r': tool.value = 'replace'; break
     case 'm': tool.value = 'mirror'; break
     case 'i': tool.value = 'pick'; break
@@ -1717,17 +1920,27 @@ function onKeyUp(e: KeyboardEvent) {
 }
 
 // ---- lifecycle ----
+// This view is wrapped in <keep-alive>, so the canvas & all edits survive
+// navigating to the MARD palette tab and back. Global listeners are bound on
+// activate / unbound on deactivate so shortcuts don't fire on other pages.
 function onResize() { syncCanvasSize() }
-onMounted(() => {
+function bindGlobalEvents() {
   window.addEventListener('resize', onResize)
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('keyup', onKeyUp)
-})
-onBeforeUnmount(() => {
+}
+function unbindGlobalEvents() {
   window.removeEventListener('resize', onResize)
   window.removeEventListener('keydown', onKeyDown)
   window.removeEventListener('keyup', onKeyUp)
+}
+onActivated(() => {
+  bindGlobalEvents()
+  // container size may have changed while the view was inactive
+  if (grid.value) nextTick(() => syncCanvasSize())
 })
+onDeactivated(unbindGlobalEvents)
+onBeforeUnmount(unbindGlobalEvents)
 watch(tier, () => {
   // keep currentCode valid for the new tier's picker
   if (currentCode.value && !MARD_TIERS[tier.value].includes(currentCode.value)) {
