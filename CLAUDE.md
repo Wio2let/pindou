@@ -95,6 +95,8 @@
     撤销/翻转/变换…）会经 `watch(grid)` 自动清除选区。
   - 裁剪：选区工具激活时工具栏出现「◳ 裁剪选区」，`cropToSelection` 把网格
     裁到选区范围（区外丢弃、网格尺寸变为选区大小，可撤销）。
+  - 画布尺寸：工具栏「📐 画布尺寸」弹窗 `applyResize` 同时改宽高 + 九宫格
+    锚点，图案 1:1 不缩放放进新画布——放大留空格、缩小裁切，比例不变。
   - 全屏画布：工具栏 ⛶ 按钮 / F 键切换，`.canvas-col` 经 `<Teleport to="#app">`
     传送出去后 `position:fixed` 占满视口（必须传送——`.main>*` 的 `pop-in`
     动画 `both` 残留 transform 会困住 fixed）。导出/购买弹窗同样 `Teleport`

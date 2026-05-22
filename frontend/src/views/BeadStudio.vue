@@ -182,6 +182,10 @@
                   title="一键去背景：从图纸四边洪水填充，清除与边缘相连、接近背景色的格子">
             ✂️ 去背景
           </button>
+          <button class="btn btn-ghost btn-sm" @click="openResizeDialog"
+                  title="调整画布大小：同时改宽高，图案比例不变，多出的格子留空">
+            📐 画布尺寸
+          </button>
           <div class="tool-divider"></div>
           <div class="tool-group">
             <button class="tool-btn" title="缩小 (-)" @click="zoomBy(-1)">－</button>
@@ -496,6 +500,45 @@
     :codes="myPaletteCodes"
     @apply="onPaletteApply"
     @close="showPalettePicker = false" />
+
+  <!-- Canvas-resize dialog -->
+  <Teleport to="#app" :disabled="!fullscreen">
+  <div v-if="showResizeDialog && grid" class="resize-overlay"
+       @click.self="showResizeDialog = false">
+    <div class="resize-modal card">
+      <div class="resize-head">
+        <span class="resize-title">📐 调整画布大小</span>
+        <button class="resize-x" @click="showResizeDialog = false">✕</button>
+      </div>
+      <div class="resize-body">
+        <div class="resize-cur">当前画布：{{ grid!.width }} × {{ grid!.height }} 颗豆</div>
+        <div class="resize-fields">
+          <label>宽
+            <input type="number" min="1" max="400" v-model.number="resizeW" class="input" />
+          </label>
+          <span class="resize-x-sign">×</span>
+          <label>高
+            <input type="number" min="1" max="400" v-model.number="resizeH" class="input" />
+          </label>
+          <span class="resize-unit">颗豆</span>
+        </div>
+        <div class="resize-anchor-label">图案锚点 · 原图案放在新画布的哪个位置</div>
+        <div class="resize-anchor">
+          <button v-for="i in 9" :key="i" type="button"
+                  class="anchor-cell" :class="{ on: resizeAnchor === i - 1 }"
+                  @click="resizeAnchor = i - 1"></button>
+        </div>
+        <div class="resize-note">
+          图案比例保持不变：放大时多出的格子留空，缩小时超出的部分会被裁掉。
+        </div>
+      </div>
+      <div class="resize-foot">
+        <button class="btn btn-ghost" @click="showResizeDialog = false">取消</button>
+        <button class="btn btn-primary" @click="applyResize">应用</button>
+      </div>
+    </div>
+  </div>
+  </Teleport>
 </template>
 
 <script lang="ts">
@@ -532,6 +575,11 @@ const sourceImg = shallowRef<HTMLImageElement | null>(null)
 const sourcePreview = ref('')
 const isDragging = ref(false)
 const showConvSettings = ref(false)   // collapsible advanced conversion settings
+// ---- canvas-resize dialog (resize without scaling the pattern) ----
+const showResizeDialog = ref(false)
+const resizeW = ref(0)
+const resizeH = ref(0)
+const resizeAnchor = ref(4)           // 0-8, row-major 3x3 grid; 4 = center
 
 const gridWidth = ref(56)
 const blankHeight = ref(56)                // height for "new blank canvas"
@@ -1872,6 +1920,47 @@ function cropToSelection() {
   ElMessage.success(`已裁剪到 ${nw} × ${nh}`)
 }
 
+// ---- canvas resize (change W & H without scaling — pad with empty cells) ----
+function openResizeDialog() {
+  const g = grid.value
+  if (!g) return
+  resizeW.value = g.width
+  resizeH.value = g.height
+  resizeAnchor.value = 4
+  showResizeDialog.value = true
+}
+/**
+ * Resize the canvas to resizeW × resizeH WITHOUT scaling the pattern: each
+ * existing bead keeps its size, the pattern is placed at the chosen anchor,
+ * extra room is filled with empty cells, and any overflow is cropped.
+ */
+function applyResize() {
+  const g = grid.value
+  if (!g) return
+  const nw = Math.max(1, Math.min(400, Math.round(resizeW.value || 0)))
+  const nh = Math.max(1, Math.min(400, Math.round(resizeH.value || 0)))
+  if (nw === g.width && nh === g.height) { showResizeDialog.value = false; return }
+  // anchor: column 0/1/2 = left/center/right, row 0/1/2 = top/middle/bottom
+  const ac = resizeAnchor.value % 3, ar = (resizeAnchor.value / 3) | 0
+  const ox = ac === 0 ? 0 : ac === 2 ? nw - g.width : Math.round((nw - g.width) / 2)
+  const oy = ar === 0 ? 0 : ar === 2 ? nh - g.height : Math.round((nh - g.height) / 2)
+  pushHistory()
+  const cells: (string | null)[] = new Array(nw * nh).fill(null)
+  for (let y = 0; y < g.height; y++) {
+    for (let x = 0; x < g.width; x++) {
+      const nx = x + ox, ny = y + oy
+      if (nx >= 0 && nx < nw && ny >= 0 && ny < nh)
+        cells[ny * nw + nx] = g.cells[y * g.width + x]
+    }
+  }
+  grid.value = { width: nw, height: nh, cells }
+  gridVersion.value++
+  syncWidthFromGrid()
+  showResizeDialog.value = false
+  nextTick(() => { syncCanvasSize(); fitView() })
+  ElMessage.success(`画布已调整为 ${nw} × ${nh}`)
+}
+
 function onDown(e: MouseEvent) {
   if (transforming.value) { transformOnDown(e); return }
   if (tool.value === 'pan' || e.button === 1) {
@@ -2787,6 +2876,68 @@ watch(grid, () => { clearSelection(); render() })
   line-height: 1.6;
   padding: 0.6rem 0.3rem;
   text-align: center;
+}
+
+/* canvas-resize dialog */
+.resize-overlay {
+  position: fixed; inset: 0;
+  background: rgba(74,54,69,0.35);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 100; backdrop-filter: blur(4px);
+}
+.resize-modal {
+  width: min(380px, 92vw);
+  padding: 1.1rem 1.3rem;
+  animation: pop-in 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+.resize-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 0.9rem;
+}
+.resize-title { font-family: var(--font-display); font-size: 1.05rem; color: var(--plum-1); }
+.resize-x { background: none; border: none; font-size: 1.1rem; cursor: pointer; color: var(--plum-3); }
+.resize-x:hover { color: var(--plum-1); }
+.resize-body { display: flex; flex-direction: column; gap: 0.7rem; }
+.resize-cur { font-size: 0.78rem; color: var(--plum-3); }
+.resize-fields { display: flex; align-items: center; gap: 0.5rem; }
+.resize-fields label {
+  display: flex; align-items: center; gap: 0.35rem;
+  font-size: 0.85rem; color: var(--plum-2); font-weight: 700;
+}
+.resize-fields .input { width: 78px; text-align: center; }
+.resize-x-sign { color: var(--plum-3); font-weight: 700; }
+.resize-unit { font-size: 0.72rem; color: var(--plum-3); }
+.resize-anchor-label {
+  font-size: 0.74rem; color: var(--plum-2); font-weight: 700; margin-top: 0.2rem;
+}
+.resize-anchor {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  width: 96px;
+}
+.anchor-cell {
+  aspect-ratio: 1;
+  border: 2px solid var(--cream-4);
+  background: #fff;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+.anchor-cell:hover { border-color: var(--sakura-light); }
+.anchor-cell.on {
+  background: var(--sakura);
+  border-color: var(--sakura);
+  box-shadow: 0 2px 8px var(--sakura-glow);
+}
+.resize-note {
+  font-size: 0.72rem; color: var(--plum-3); line-height: 1.6;
+  background: var(--cream-2); border-radius: var(--radius-sm); padding: 0.45rem 0.6rem;
+}
+.resize-foot {
+  display: flex; justify-content: flex-end; gap: 0.6rem;
+  margin-top: 1rem; padding-top: 0.8rem;
+  border-top: 2px dashed var(--line-strong);
 }
 .zoom-label { font-size: 0.76rem; color: var(--plum-2); min-width: 42px; text-align: center; }
 .grid-size { font-size: 0.76rem; color: var(--plum-3); }
