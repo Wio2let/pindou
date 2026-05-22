@@ -2,56 +2,76 @@
   <div class="bead-studio">
     <BeadTabs />
 
-    <!-- ===== Step 1: source + params ===== -->
+    <!-- ===== Start panel: convert image / new canvas / import project ===== -->
     <div class="card setup-card">
-      <div class="setup-grid">
-        <!-- Upload zone -->
-        <div class="upload-zone"
-             :class="{ dragging: isDragging, filled: !!sourcePreview }"
-             @click="pickFile"
-             @dragover.prevent="isDragging = true"
-             @dragleave.prevent="isDragging = false"
-             @drop.prevent="onDrop">
-          <img v-if="sourcePreview" :src="sourcePreview" class="upload-preview" alt="原图" />
-          <div v-else class="upload-hint">
-            <div class="upload-emoji">🖼️</div>
-            <div class="upload-text">点击或拖入图片</div>
-            <div class="upload-sub">JPG / PNG / GIF · 仅本地</div>
+      <div class="entry-grid">
+        <!-- 转换图片 -->
+        <div class="entry-card">
+          <div class="entry-stage upload-zone"
+               :class="{ dragging: isDragging, filled: !!sourcePreview }"
+               @click="pickFile"
+               @dragover.prevent="isDragging = true"
+               @dragleave.prevent="isDragging = false"
+               @drop.prevent="onDrop">
+            <img v-if="sourcePreview" :src="sourcePreview" class="upload-preview" alt="原图" />
+            <div v-else class="upload-hint">
+              <div class="upload-emoji">🖼️</div>
+              <div class="upload-text">点击或拖入图片</div>
+              <div class="upload-sub">JPG / PNG / GIF</div>
+            </div>
+            <input ref="fileInput" type="file" accept="image/*" hidden @change="onFileChange" />
           </div>
-          <input ref="fileInput" type="file" accept="image/*" hidden @change="onFileChange" />
+          <button v-if="sourceImg" class="btn btn-primary entry-btn"
+                  :disabled="converting" @click="convert(true)">
+            {{ converting ? '转换中…' : '🔄 用当前图片重新转换' }}
+          </button>
+          <div class="entry-title">🖼️ 转换图片</div>
+          <div class="entry-desc">选择或拖入一张图片，自动转换成拼豆图纸，导入后可在画布上继续编辑。</div>
         </div>
 
-        <!-- Params -->
-        <div class="params">
-          <div class="form-row">
-            <label>网格宽度（横向豆数）</label>
-            <div class="flex items-center gap-3">
-              <input type="range" min="16" max="180" step="1"
-                     v-model.number="gridWidth" class="slider"
-                     :disabled="algo === 'native'" />
-              <input type="number" min="8" max="220"
-                     v-model.number="gridWidth" class="input" style="width:80px;"
-                     :disabled="algo === 'native'" />
+        <!-- 新建画布 -->
+        <div class="entry-card">
+          <div class="entry-stage blank-stage">
+            <div class="blank-size">
+              <label>宽
+                <input type="number" min="8" max="220" v-model.number="gridWidth" class="input" />
+              </label>
+              <span class="blank-x">×</span>
+              <label>高
+                <input type="number" min="8" max="220" v-model.number="blankHeight" class="input" />
+              </label>
             </div>
-            <span class="form-hint" v-if="algo === 'native'">
-              🧩 像素画模式：尺寸按原图像素自动确定，无需设置宽度
-            </span>
-            <span class="form-hint" v-else-if="sourceImg">
-              成品约 {{ gridWidth }} × {{ estHeight }} 颗豆
-            </span>
+            <div class="blank-unit">单位：颗豆</div>
+            <button class="btn btn-primary entry-btn" @click="newBlankGrid">✏️ 新建空白画布</button>
           </div>
+          <div class="entry-title">✏️ 新建画布</div>
+          <div class="entry-desc">设定宽 × 高，从一张空白画布开始自由手绘你的拼豆图。</div>
+        </div>
 
-          <div class="form-row">
-            <label>网格高度（纵向豆数）</label>
-            <div class="flex items-center gap-3">
-              <input type="range" min="16" max="180" step="1"
-                     v-model.number="blankHeight" class="slider" />
-              <input type="number" min="8" max="220"
-                     v-model.number="blankHeight" class="input" style="width:80px;" />
+        <!-- 导入工程 -->
+        <div class="entry-card">
+          <div class="entry-stage upload-zone proj-zone"
+               @click="pickProjectFile"
+               @dragover.prevent
+               @drop.prevent="onProjectDrop">
+            <div class="upload-hint">
+              <div class="upload-emoji">📦</div>
+              <div class="upload-text">点击或拖入工程文件</div>
+              <div class="upload-sub">.beadproj</div>
             </div>
-            <span class="form-hint">仅用于「新建空白画布」；导入图片时高度按比例自动计算</span>
           </div>
+          <div class="entry-title">📦 导入工程</div>
+          <div class="entry-desc">打开之前保存的 .beadproj 工程文件，恢复画布与全部设置继续编辑。</div>
+        </div>
+      </div>
 
+      <!-- collapsible advanced conversion settings -->
+      <div class="conv-section">
+        <div class="conv-toggle" @click="showConvSettings = !showConvSettings">
+          <span class="conv-toggle-icon">{{ showConvSettings ? '▼' : '▶' }}</span>
+          <span>转换设置 · 算法 / 平替 / 色板</span>
+        </div>
+        <div v-if="showConvSettings" class="conv-body">
           <div class="form-row">
             <label>生成算法</label>
             <select class="select" v-model="algo">
@@ -59,7 +79,6 @@
             </select>
             <span class="form-hint">{{ algoDesc }}</span>
           </div>
-
           <div class="form-row">
             <label>平替算法</label>
             <select class="select" v-model="matchMetric">
@@ -67,7 +86,6 @@
             </select>
             <span class="form-hint">{{ matchDesc }}</span>
           </div>
-
           <div class="form-row">
             <label>色板模式</label>
             <div class="mode-toggle">
@@ -75,7 +93,6 @@
               <button class="mode-btn" :class="{ on: palMode === 'custom' }" @click="palMode = 'custom'">我的色板</button>
             </div>
           </div>
-
           <div class="form-row" v-if="palMode === 'tier'">
             <label>工作色板</label>
             <select class="select" v-model="tier">
@@ -87,37 +104,15 @@
             <label>我的色板</label>
             <span class="form-hint">{{ workingPalette.length > 0 ? `已选 ${workingPalette.length} 色，可在右侧「我的色板」面板管理` : '⚠ 尚未添加任何颜色，请在右侧面板添加' }}</span>
           </div>
-
-          <div class="form-row">
-            <label>自动抠图</label>
-            <label class="subj-check">
-              <input type="checkbox" v-model="subjectOnly" />
-              <span>转换时自动识别主体、去除背景（只转主体）</span>
-            </label>
-            <span class="form-hint">背景较干净的图（贴纸 / Logo / 单色底）效果最佳</span>
-          </div>
-
-          <button class="btn btn-primary convert-btn"
-                  :disabled="!sourceImg || converting"
-                  @click="convert(true)">
-            {{ converting ? '转换中…' : grid ? '🔄 重新转换' : '✨ 转换成拼豆图纸' }}
-          </button>
-          <button class="btn btn-ghost convert-btn"
-                  @click="newBlankGrid">
-            ✏️ 新建空白画布（{{ gridWidth }} × {{ blankHeight }}）
-          </button>
         </div>
       </div>
-    </div>
 
-    <!-- ===== Empty state ===== -->
-    <div v-if="!grid" class="empty-state" style="margin-top:2rem;">
-      <div class="empty-icon">🧩</div>
-      <div class="empty-text">上传图片转换，或点上方「✏️ 新建空白画布」直接开画~</div>
+      <input ref="projInput" type="file" accept=".beadproj,.json,application/json"
+             hidden @change="onProjectFileChange" />
     </div>
 
     <!-- ===== Workspace ===== -->
-    <div v-else class="workspace">
+    <div v-if="grid" class="workspace">
       <!-- Canvas column — teleported to #app in fullscreen so position:fixed
            escapes the transformed .bead-studio containing block, while staying
            in #app's stacking context so modal dialogs (z-index 100) stay above -->
@@ -153,6 +148,11 @@
           <div class="size-tag sel-hint" v-show="tool === 'select'">
             ⬚ 拖拽框选 · 框内拖动移动 · Delete 删 · Esc 取消
           </div>
+          <button class="btn btn-ghost btn-sm" v-show="tool === 'select'"
+                  :disabled="!selection" @click="cropToSelection"
+                  title="把画布裁剪到当前选区范围（区外丢弃）">
+            ◳ 裁剪选区
+          </button>
           <div class="tool-divider"></div>
           <div class="tool-group">
             <button class="tool-btn" title="撤销 (Ctrl+Z)"
@@ -168,10 +168,12 @@
                     title="自由变换（缩放 / 任意角度旋转）" @click="startTransform">⤢</button>
           </div>
           <div class="tool-divider"></div>
-          <div class="cur-color">
+          <button type="button" class="cur-color" :class="{ active: showColorPanel }"
+                  title="点击打开调色板（全屏时也能选色）" @click="toggleColorPanel">
             <span class="cur-swatch" :style="{ background: curColorHex }"></span>
             <span class="cur-label mono">{{ currentCode || '—' }}</span>
-          </div>
+            <span class="cur-caret">{{ showColorPanel ? '▴' : '▾' }}</span>
+          </button>
           <button class="btn btn-ghost btn-sm" @click="outlineShape"
                   title="一键描边：沿图案外缘描一圈「当前色」（先在调色板选好颜色）">
             🖍 描边
@@ -200,6 +202,14 @@
             <input type="checkbox" v-model="showLabels" />
             <span>标色号</span>
           </label>
+          <button class="btn btn-ghost btn-sm" @click="saveProject"
+                  title="保存为工程文件（.beadproj），下次可打开继续编辑">
+            💾 存工程
+          </button>
+          <button class="btn btn-ghost btn-sm" @click="pickProjectFile"
+                  title="打开已保存的工程文件继续编辑">
+            📂 开工程
+          </button>
           <button class="btn btn-ghost btn-sm" @click="openExportDialog">
             ⬇ 导出
           </button>
@@ -213,14 +223,12 @@
           <label class="pb-cell pb-wide">
             <span class="pb-label">网格宽度 · {{ grid.width }}×{{ grid.height }}</span>
             <input type="range" min="16" max="180" step="1"
-                   v-model.number="gridWidth" class="slider"
-                   :disabled="algo === 'native'" />
+                   v-model.number="gridWidth" class="slider" />
           </label>
           <label class="pb-cell">
             <span class="pb-label">豆数</span>
             <input type="number" min="16" max="180"
-                   v-model.number="gridWidth" class="input"
-                   :disabled="algo === 'native'" />
+                   v-model.number="gridWidth" class="input" />
           </label>
           <label class="pb-cell">
             <span class="pb-label">算法</span>
@@ -314,6 +322,41 @@
             <span class="xform-info mono">缩放 {{ xformScalePct }}% · 旋转 {{ xformAngleDeg }}°</span>
             <button class="btn btn-sm btn-primary" @click="applyTransform">✓ 应用</button>
             <button class="btn btn-sm btn-ghost" @click="cancelTransform">✕ 取消</button>
+          </div>
+        </div>
+
+        <!-- Floating palette — selectable even in fullscreen mode -->
+        <div v-if="showColorPanel" class="color-panel" :style="{ top: colorPanelTop + 'px' }">
+          <div class="color-panel-head">
+            <span class="cp-swatch" :style="{ background: curColorHex }"></span>
+            <span class="cp-title">调色板 · {{ currentCode || '—' }}</span>
+            <button class="cp-close" title="关闭 (Esc)" @click="showColorPanel = false">✕</button>
+          </div>
+          <div class="color-panel-modes">
+            <button class="mode-btn" :class="{ on: palMode === 'tier' }"
+                    @click="palMode = 'tier'">套装色板</button>
+            <button class="mode-btn" :class="{ on: palMode === 'custom' }"
+                    @click="palMode = 'custom'">我的色板</button>
+          </div>
+          <div class="color-panel-body">
+            <div v-if="paletteGroups.length === 0" class="cp-empty">
+              「我的色板」还是空的 —— 退出全屏后在右侧「我的色板」面板添加色号
+            </div>
+            <div v-for="grp in paletteGroups" :key="grp.key" class="pal-group">
+              <div class="pal-group-label">
+                <span class="pal-group-key">{{ grp.key }}</span>
+                <span>{{ grp.name }}</span>
+                <span class="pal-group-n">{{ grp.colors.length }}</span>
+              </div>
+              <div class="palette-grid">
+                <button v-for="c in grp.colors" :key="c.code"
+                        class="pal-swatch"
+                        :class="{ on: currentCode === c.code, used: usedCodes.has(c.code) }"
+                        :style="{ background: c.hex }"
+                        :title="`${c.code} ${c.name}`"
+                        @click="selectColor(c.code)"></button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -468,7 +511,7 @@ import {
   type Tier, type BeadColor,
 } from '../data/mardPalettes'
 import {
-  imageToGrid, detectPixelArt, countColors, paletteGaps, substituteFor, textOn,
+  imageToGrid, countColors, paletteGaps, substituteFor, textOn,
   ALGO_OPTIONS, MATCH_OPTIONS, type PerlerGrid, type ConvertAlgo, type MatchMetric,
 } from '../composables/usePerler'
 import BeadTabs from '../components/BeadTabs.vue'
@@ -481,19 +524,20 @@ type BeadShape = 'circle' | 'square' | 'fill'
 
 // ---- state ----
 const fileInput = ref<HTMLInputElement | null>(null)
+const projInput = ref<HTMLInputElement | null>(null)   // .beadproj project file
 const wrapRef = ref<HTMLDivElement | null>(null)
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 
 const sourceImg = shallowRef<HTMLImageElement | null>(null)
 const sourcePreview = ref('')
 const isDragging = ref(false)
+const showConvSettings = ref(false)   // collapsible advanced conversion settings
 
 const gridWidth = ref(56)
 const blankHeight = ref(56)                // height for "new blank canvas"
 const tier = ref<Tier>('264')
 const algo = ref<ConvertAlgo>('smooth')
 const matchMetric = ref<MatchMetric>('lab')
-const subjectOnly = ref(false)            // auto-detect subject, drop background on convert
 const showLabels = ref(false)   // show MARD codes on every bead (canvas + export)
 const beadShape = ref<BeadShape>('circle')
 const beadSize = ref(2.6)                 // physical bead diameter, mm
@@ -546,6 +590,8 @@ const zoom = ref(1)
 const offset = ref({ x: 28, y: 28 })
 const hover = ref<{ x: number; y: number } | null>(null)
 const fullscreen = ref(false)   // canvas fills the whole viewport
+const showColorPanel = ref(false)   // floating palette — usable while fullscreen
+const colorPanelTop = ref(56)       // panel top offset (below the toolbars)
 
 const tools: { id: Tool; icon: string; label: string; key: string }[] = [
   { id: 'paint',     icon: '🖌', label: '画笔', key: 'B' },
@@ -682,19 +728,6 @@ function loadFile(file: File) {
     img.onload = () => {
       sourceImg.value = img
       sourcePreview.value = String(reader.result)
-      // 像素画自动识别：本身就是像素画 → 切到「原图像素 1:1」原样导入；
-      // 否则若仍停留在 native 模式则切回普通算法。
-      const pa = detectPixelArt(img)
-      const wantAlgo: ConvertAlgo =
-        pa.isPixelArt ? 'native' : (algo.value === 'native' ? 'smooth' : algo.value)
-      if (wantAlgo !== algo.value) {
-        suppressReconv = true
-        algo.value = wantAlgo
-        nextTick(() => { suppressReconv = false })
-      }
-      if (pa.isPixelArt) {
-        ElMessage.success(`检测到像素画，已按原始 ${pa.nativeW}×${pa.nativeH} 像素 1:1 导入`)
-      }
       // 拖入 / 选择图片后立即转换成拼豆图纸（无论当前是空白画布还是已有图纸）
       convert(true)
     }
@@ -702,6 +735,116 @@ function loadFile(file: File) {
     img.src = String(reader.result)
   }
   reader.readAsDataURL(file)
+}
+
+// ---- project file (.beadproj) ----
+function pickProjectFile() { projInput.value?.click() }
+function onProjectFileChange(e: Event) {
+  const input = e.target as HTMLInputElement
+  const f = input.files?.[0]
+  if (f) openProjectFile(f)
+  input.value = ''   // allow re-opening the same file
+}
+function onProjectDrop(e: DragEvent) {
+  const f = e.dataTransfer?.files?.[0]
+  if (f) openProjectFile(f)
+}
+
+/** Save the whole editable state as a .beadproj (JSON) project file. */
+function saveProject() {
+  const g = grid.value
+  if (!g) { ElMessage.info('画布还是空的，没有可保存的工程'); return }
+  const proj = {
+    format: 'bead-studio-project',
+    version: 1,
+    savedAt: new Date().toISOString(),
+    grid: { width: g.width, height: g.height, cells: g.cells },
+    beadShape: beadShape.value,
+    beadSize: beadSize.value,
+    showLabels: showLabels.value,
+    tier: tier.value,
+    palMode: palMode.value,
+    myPalette: myPaletteCodes.value,
+    algo: algo.value,
+    matchMetric: matchMetric.value,
+    currentCode: currentCode.value,
+    gridWidth: gridWidth.value,
+    blankHeight: blankHeight.value,
+    source: sourcePreview.value || null,   // keeps width / algorithm re-convert working
+  }
+  const blob = new Blob([JSON.stringify(proj)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.download = `拼豆工程_${g.width}x${g.height}.beadproj`
+  a.href = url
+  a.click()
+  URL.revokeObjectURL(url)
+  ElMessage.success('工程已保存')
+}
+
+/** Load a .beadproj file and restore the full editable state. */
+function openProjectFile(file: File) {
+  const reader = new FileReader()
+  reader.onload = () => {
+    let proj: any
+    try { proj = JSON.parse(String(reader.result)) }
+    catch { ElMessage.error('工程文件无法解析'); return }
+    if (!proj || proj.format !== 'bead-studio-project' || !proj.grid) {
+      ElMessage.error('这不是有效的拼豆工程文件')
+      return
+    }
+    const pg = proj.grid
+    if (typeof pg.width !== 'number' || typeof pg.height !== 'number'
+        || !Array.isArray(pg.cells) || pg.cells.length !== pg.width * pg.height) {
+      ElMessage.error('工程文件的画布数据已损坏')
+      return
+    }
+    // restore settings — suppressReconv blocks the watch from re-converting
+    suppressReconv = true
+    if (['circle', 'square', 'fill'].includes(proj.beadShape)) beadShape.value = proj.beadShape
+    if ([2.6, 3, 5].includes(proj.beadSize)) beadSize.value = proj.beadSize
+    if (typeof proj.showLabels === 'boolean') showLabels.value = proj.showLabels
+    if (proj.tier && TIER_ORDER.includes(proj.tier)) tier.value = proj.tier
+    if (proj.palMode === 'tier' || proj.palMode === 'custom') palMode.value = proj.palMode
+    if (Array.isArray(proj.myPalette)) myPaletteCodes.value = proj.myPalette
+    if (proj.algo && ALGO_OPTIONS.some(a => a.id === proj.algo)) algo.value = proj.algo
+    if (proj.matchMetric && MATCH_OPTIONS.some(m => m.id === proj.matchMetric)) {
+      matchMetric.value = proj.matchMetric
+    }
+    if (typeof proj.blankHeight === 'number') blankHeight.value = proj.blankHeight
+    gridWidth.value = pg.width
+    // restore the grid
+    grid.value = { width: pg.width, height: pg.height, cells: pg.cells.slice() }
+    gridVersion.value++
+    undoStack.length = 0
+    redoStack.length = 0
+    histVer.value++
+    // restore the source image so width / algorithm re-convert still works
+    if (typeof proj.source === 'string' && proj.source) {
+      const img = new Image()
+      img.onload = () => { sourceImg.value = img }
+      img.src = proj.source
+      sourcePreview.value = proj.source
+    } else {
+      sourceImg.value = null
+      sourcePreview.value = ''
+    }
+    // pick a valid current paint color
+    if (proj.currentCode && MARD_COLORS[proj.currentCode]) {
+      currentCode.value = proj.currentCode
+    } else {
+      const first = [...countColors(grid.value).entries()].sort((a, b) => b[1] - a[1])[0]
+      currentCode.value = first?.[0] || workingPalette.value[0]?.code || ''
+    }
+    nextTick(() => {
+      suppressReconv = false
+      syncCanvasSize()
+      fitView()
+    })
+    ElMessage.success('工程已载入，可继续编辑')
+  }
+  reader.onerror = () => ElMessage.error('工程文件读取失败')
+  reader.readAsText(file)
 }
 
 // ---- reference image ----
@@ -752,13 +895,7 @@ async function convert(refit = true) {
       sourceImg.value, gridWidth.value, workingPalette.value,
       algo.value, matchMetric.value,
     )
-    // 自动抠图：识别主体、清除背景，只保留主体
-    if (subjectOnly.value) {
-      for (const i of detectBackgroundCells(grid.value)) grid.value.cells[i] = null
-    }
     gridVersion.value++
-    // 「原图像素」模式下网格尺寸由原图决定 —— 把宽度滑块同步过去
-    syncWidthFromGrid()
     if (refit) {
       // a fresh conversion from the button invalidates the edit history
       undoStack.length = 0
@@ -829,7 +966,7 @@ function resampleGrid(newW: number, newH: number) {
 // `suppressReconv` blocks the watch while undo/redo syncs the width slider.
 let suppressReconv = false
 let reconvTimer: number | undefined
-watch([gridWidth, algo, tier, matchMetric, palMode, myPaletteCodes, subjectOnly], (nv, ov) => {
+watch([gridWidth, algo, tier, matchMetric, palMode, myPaletteCodes], (nv, ov) => {
   if (suppressReconv || !grid.value || transforming.value) return
   if (reconvTimer) clearTimeout(reconvTimer)
   if (sourceImg.value) {
@@ -858,6 +995,14 @@ function selectColor(code: string) {
   currentCode.value = code
   if (tool.value === 'erase' || tool.value === 'pan' || tool.value === 'mirror') {
     tool.value = 'paint'
+  }
+}
+
+// Floating palette — lets the side-panel colors be picked while fullscreen.
+function toggleColorPanel() {
+  showColorPanel.value = !showColorPanel.value
+  if (showColorPanel.value) {
+    nextTick(() => { colorPanelTop.value = wrapRef.value?.offsetTop ?? 56 })
   }
 }
 
@@ -1703,6 +1848,30 @@ function deleteSelection() {
   render()
 }
 
+/** Crop the grid down to the current selection rectangle (region outside is discarded). */
+function cropToSelection() {
+  const g = grid.value, s = selection.value
+  if (!g) return
+  if (!s) { ElMessage.info('请先用「选区」工具框选要保留的范围'); return }
+  // clamp the selection to the grid
+  const x0 = Math.max(0, s.x), y0 = Math.max(0, s.y)
+  const x1 = Math.min(g.width, s.x + s.w), y1 = Math.min(g.height, s.y + s.h)
+  const nw = x1 - x0, nh = y1 - y0
+  if (nw < 1 || nh < 1) { ElMessage.warning('选区不在画布范围内'); return }
+  if (nw === g.width && nh === g.height) { ElMessage.info('选区已是整张画布，无需裁剪'); return }
+  pushHistory()
+  const cells: (string | null)[] = new Array(nw * nh)
+  for (let y = 0; y < nh; y++)
+    for (let x = 0; x < nw; x++)
+      cells[y * nw + x] = g.cells[(y0 + y) * g.width + (x0 + x)]
+  grid.value = { width: nw, height: nh, cells }
+  gridVersion.value++
+  syncWidthFromGrid()
+  // grid was reassigned → watch(grid) clears the selection & repaints
+  nextTick(() => { syncCanvasSize(); fitView() })
+  ElMessage.success(`已裁剪到 ${nw} × ${nh}`)
+}
+
 function onDown(e: MouseEvent) {
   if (transforming.value) { transformOnDown(e); return }
   if (tool.value === 'pan' || e.button === 1) {
@@ -2207,6 +2376,7 @@ function onKeyDown(e: KeyboardEvent) {
     e.preventDefault(); deleteSelection(); return
   }
   if (e.key === 'Escape') {
+    if (showColorPanel.value) { e.preventDefault(); showColorPanel.value = false; return }
     if (selection.value) { e.preventDefault(); clearSelection(); render(); return }
     if (fullscreen.value) { e.preventDefault(); fullscreen.value = false; return }
   }
@@ -2281,6 +2451,7 @@ watch(tier, () => {
 
 // Toggling fullscreen resizes the canvas container — re-fit after the DOM updates.
 watch(fullscreen, () => {
+  showColorPanel.value = false   // toolbar height changes → panel offset stale
   nextTick(() => { syncCanvasSize(); fitView() })
 })
 
@@ -2297,20 +2468,40 @@ watch(grid, () => { clearSelection(); render() })
 <style scoped>
 .bead-studio { display: flex; flex-direction: column; gap: 1rem; }
 
-/* ===== setup ===== */
-.setup-card { padding: 1.1rem 1.25rem; }
-.setup-grid {
+/* ===== setup — start panel (3 evenly-distributed entry cards) ===== */
+.setup-card { padding: 1.25rem 1.4rem; }
+.entry-grid {
   display: grid;
-  grid-template-columns: 220px 1fr;
-  gap: 1.25rem;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.1rem;
 }
-@media (max-width: 720px) { .setup-grid { grid-template-columns: 1fr; } }
+@media (max-width: 760px) { .entry-grid { grid-template-columns: 1fr; } }
+
+.entry-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.entry-stage { height: 150px; flex-shrink: 0; }
+.entry-title {
+  font-family: var(--font-display);
+  font-size: 1rem;
+  color: var(--plum-1);
+  text-align: center;
+  margin-top: 0.1rem;
+}
+.entry-desc {
+  font-size: 0.74rem;
+  color: var(--plum-3);
+  line-height: 1.65;
+  text-align: center;
+}
+.entry-btn { width: 100%; }
 
 .upload-zone {
   border: 2.5px dashed var(--sakura-light);
   border-radius: var(--radius-md);
   background: var(--cream-2);
-  height: 170px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2328,10 +2519,45 @@ watch(grid, () => { clearSelection(); render() })
 .upload-emoji { font-size: 2rem; }
 .upload-text { font-family: var(--font-display); font-size: 1rem; margin-top: 0.3rem; }
 .upload-sub { font-size: 0.7rem; color: var(--plum-3); margin-top: 0.15rem; }
+.proj-zone:hover { border-color: var(--plum-2); background: var(--cream-3, var(--cream-2)); }
 
-.params { display: flex; flex-direction: column; gap: 0.85rem; }
+/* new-canvas stage */
+.blank-stage {
+  border: 2.5px dashed var(--sakura-light);
+  border-radius: var(--radius-md);
+  background: var(--cream-2);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+}
+.blank-size { display: flex; align-items: center; gap: 0.45rem; }
+.blank-size label {
+  display: flex; align-items: center; gap: 0.3rem;
+  font-size: 0.82rem; color: var(--plum-2);
+}
+.blank-size .input { width: 66px; text-align: center; }
+.blank-x { color: var(--plum-3); font-weight: 700; }
+.blank-unit { font-size: 0.68rem; color: var(--plum-3); }
+
+/* collapsible advanced conversion settings */
+.conv-section { margin-top: 1rem; border-top: 2px dashed var(--line-strong); padding-top: 0.7rem; }
+.conv-toggle {
+  display: flex; align-items: center; gap: 0.4rem;
+  cursor: pointer; user-select: none;
+  font-size: 0.82rem; font-weight: 700; color: var(--plum-2);
+}
+.conv-toggle-icon { font-size: 0.65rem; }
+.conv-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem 1.25rem;
+  margin-top: 0.7rem;
+}
+@media (max-width: 720px) { .conv-body { grid-template-columns: 1fr; } }
+
 .slider { flex: 1; accent-color: var(--sakura); cursor: pointer; }
-.convert-btn { align-self: flex-start; }
 
 /* ===== workspace ===== */
 .workspace {
@@ -2342,7 +2568,7 @@ watch(grid, () => { clearSelection(); render() })
 }
 @media (max-width: 1000px) { .workspace { grid-template-columns: 1fr; } }
 
-.canvas-col { padding: 0; overflow: hidden; }
+.canvas-col { padding: 0; overflow: hidden; position: relative; }
 
 /* fullscreen canvas — teleported to <body>, covers the whole viewport */
 .canvas-col.fullscreen {
@@ -2486,12 +2712,82 @@ watch(grid, () => { clearSelection(); render() })
   margin-left: auto;
 }
 .pb-hint.busy { color: var(--sakura-deep); font-weight: 700; }
-.cur-color { display: flex; align-items: center; gap: 0.35rem; }
+.cur-color {
+  display: flex; align-items: center; gap: 0.35rem;
+  background: #fff;
+  border: 2px solid var(--cream-4);
+  border-radius: var(--radius-sm);
+  padding: 0.1rem 0.4rem;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+.cur-color:hover { border-color: var(--sakura); }
+.cur-color.active {
+  border-color: var(--sakura);
+  background: var(--sakura-glow);
+}
 .cur-swatch {
-  width: 24px; height: 24px; border-radius: 6px;
+  width: 22px; height: 22px; border-radius: 6px;
   border: 2px solid var(--cream-4);
 }
 .cur-label { font-size: 0.78rem; color: var(--plum-2); }
+.cur-caret { font-size: 0.6rem; color: var(--plum-3); }
+
+/* floating palette panel — works inside fullscreen too */
+.color-panel {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  width: 250px;
+  background: #fff;
+  border: 2px solid var(--sakura);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-pop, 0 10px 30px rgba(74,54,69,0.25));
+  z-index: 9;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.color-panel-head {
+  display: flex; align-items: center; gap: 0.4rem;
+  padding: 0.4rem 0.55rem;
+  border-bottom: 2px dashed var(--line-strong);
+  background: var(--cream-2);
+}
+.cp-swatch {
+  width: 20px; height: 20px; border-radius: 5px;
+  border: 2px solid var(--cream-4); flex-shrink: 0;
+}
+.cp-title {
+  flex: 1; font-family: var(--font-display);
+  font-size: 0.82rem; color: var(--plum-1);
+}
+.cp-close {
+  background: none; border: none; cursor: pointer;
+  font-size: 0.9rem; color: var(--plum-3); line-height: 1;
+}
+.cp-close:hover { color: var(--plum-1); }
+.color-panel-modes {
+  display: flex;
+  gap: 2px;
+  margin: 0.45rem 0.55rem 0;
+  background: var(--cream-2);
+  border-radius: var(--radius-pill);
+  padding: 2px;
+}
+.color-panel-modes .mode-btn { flex: 1; padding: 0.25rem 0; font-size: 0.74rem; }
+.color-panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.5rem 0.55rem;
+}
+.cp-empty {
+  font-size: 0.74rem;
+  color: var(--plum-3);
+  line-height: 1.6;
+  padding: 0.6rem 0.3rem;
+  text-align: center;
+}
 .zoom-label { font-size: 0.76rem; color: var(--plum-2); min-width: 42px; text-align: center; }
 .grid-size { font-size: 0.76rem; color: var(--plum-3); }
 

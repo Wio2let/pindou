@@ -49,13 +49,9 @@
 - `frontend/src/components/BeadPalettePicker.vue` — 自定义色板选择弹窗
   （全部色号方块、按 A/B/C… 系列分类、可勾选）。
 - `frontend/src/components/BeadExportDialog.vue` — 导出弹窗（选格式 + 导出预览图，样式跟随画布）。
-- `frontend/src/composables/usePerler.ts` — 转换逻辑：9 种生成算法
-  (native/smooth/avg/sharp/slic/block/floyd/atkinson/bayer)、4 种平替算法
+- `frontend/src/composables/usePerler.ts` — 转换逻辑：8 种生成算法
+  (smooth/avg/sharp/slic/block/floyd/atkinson/bayer)、4 种平替算法
   (lab/weighted/hue/luma)。
-  `native` 为「原图像素 1:1」——图片本身是像素画时按原始像素直接量化、
-  不缩放不模糊，网格尺寸＝原图像素尺寸（忽略宽度设置）；
-  `detectPixelArt()` 用行程分析（每段同色像素长度都是放大倍率的整数倍）
-  识别放大后的像素画、并算出原始分辨率，导入时自动启用 native。
   `sharp` 为边缘保留降采样（高分辨率重采样 + 暗簇优先，保轮廓）；
   `slic` 为 SLIC 超像素聚类（CIELAB+xy 空间，相似区域合并为扁平色块）；
   `block` 为色块归并（量化后 3×3 邻域多数表决迭代，相邻像素尽量同色）；
@@ -69,23 +65,24 @@
   更新色卡只需整体替换本文件，其余功能按色号工作。
 - `frontend/src/data/pixelPalettes.ts` — **已废弃**（像素风格色板，已无引用，可删）。
 - 已实现：
-  - 转换：9 生成算法 + 4 平替算法（默认 `lab` 丝滑匹配）。拖入/选择图片
+  - 初始界面：`setup-card` 为「转换图片 / 新建画布 / 导入工程」三等分卡片
+    （`.entry-grid` 三列、每张卡片含视觉区 + 标题 + 描述）；转换参数（算法/
+    平替/色板）收在可折叠的 `.conv-section`（`showConvSettings`，默认收起）。
+  - 转换：8 生成算法 + 4 平替算法（默认 `lab` 丝滑匹配）。拖入/选择图片
     （上传区或画布上拖放皆可）会**自动转换**；改宽度/算法/色板从原图重新
     量化生成（防抖）；自动重生成前会 `pushHistory`，故 **可 Ctrl+Z 撤销回
     上一次设置**（撤销会同步宽度滑块，`suppressReconv` 防其再触发转换）。
     「🔄 重新转换」按钮则是不可撤销的全新转换。
-  - 像素画原样导入：导入图片时 `detectPixelArt` 自动识别像素画，命中则切到
-    `native` 算法按原始像素 1:1 导入（弹 ElMessage 提示），并禁用宽度输入、
-    `syncWidthFromGrid` 把网格尺寸同步给宽度滑块；非像素画且当前为 native
-    时自动切回 `smooth`。也可在算法下拉手动选「原图像素 · 1:1」。
+  - 工程文件（`.beadproj`）：`saveProject` 把网格+设置+原图 dataURL 存成 JSON；
+    `openProjectFile` 校验 `format` 后还原全部状态（`suppressReconv` 防触发重转换）。
+    工具栏「💾存工程 / 📂开工程」、设置区「📂打开工程文件」。
   - 空格渲染：透明格画**比格子小的居中小方块**标记（`emptyMargin`/`emptySize`，
     边长约 40% 格子、双色交替），让透明格与有豆格一眼可分；导出同此。
   - 空白画布：不导入图片，按宽×高「新建空白画布」直接手绘；无源图时改
     网格宽度＝对当前画布做最近邻重采样缩放（`resampleGrid`，可撤销）。
   - 一键描边：沿图案外缘补一圈「当前色」（空格中与图案相邻的格变描边色）。
-  - 抠图/去背景：边缘洪水填充识别背景（`detectBackgroundCells`，从四边
-    连通 + RGB 容差）。「✂️ 去背景」按钮手动去除；设置区「自动抠图」勾选
-    后每次转换自动识别主体、只转主体。适合背景较干净的图。
+  - 去背景：边缘洪水填充识别背景（`detectBackgroundCells`，从四边连通 +
+    RGB 容差），「✂️ 去背景」按钮手动一键去除。适合背景较干净的图。
   - 色板模式：套装色板（8 档）/ 我的色板（自定义，`localStorage` 持久化，
     可从色卡弹窗勾选或从图纸导入）。
   - 编辑工具：画笔 / 橡皮 / 魔棒画笔 / 魔棒橡皮 / 同色替换 / 镜像复制 /
@@ -96,10 +93,15 @@
     按下拖动＝**剪切式整体平移**该区域（原位留空、落点覆盖），松手提交一次
     撤销记录；Delete 清空选区内容、Esc 取消选区。任何结构性改变（转换/
     撤销/翻转/变换…）会经 `watch(grid)` 自动清除选区。
+  - 裁剪：选区工具激活时工具栏出现「◳ 裁剪选区」，`cropToSelection` 把网格
+    裁到选区范围（区外丢弃、网格尺寸变为选区大小，可撤销）。
   - 全屏画布：工具栏 ⛶ 按钮 / F 键切换，`.canvas-col` 经 `<Teleport to="#app">`
     传送出去后 `position:fixed` 占满视口（必须传送——`.main>*` 的 `pop-in`
     动画 `both` 残留 transform 会困住 fixed）。导出/购买弹窗同样 `Teleport`
     到 `#app` 才能盖在全屏画布之上（弹窗 z-index 100 > 画布 80）。
+  - 浮动调色板：点工具栏「当前色」按钮弹出 `.color-panel`（`position:absolute`
+    挂在 `.canvas-col` 上，全屏时也能选色——全屏会盖住右侧 side-col 调色板）；
+    面板内含「套装色板 / 我的色板」切换，可直接选用自定义色板。
   - 变换：左右镜像 / 上下翻转 / **自由变换**（PS 式 Ctrl+T，8 手柄缩放 +
     任意角度旋转 + 平移，确认后重采样；撤销系统为完整快照支持尺寸变化）。
   - 豆型(圆/方/填满)、豆径(2.6/3/5mm)成品尺寸、撤销重做。

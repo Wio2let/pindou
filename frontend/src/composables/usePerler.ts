@@ -11,10 +11,9 @@ export interface PerlerGrid {
 }
 
 /** Pixelation algorithms. */
-export type ConvertAlgo = 'smooth' | 'avg' | 'sharp' | 'slic' | 'block' | 'floyd' | 'atkinson' | 'bayer' | 'native'
+export type ConvertAlgo = 'smooth' | 'avg' | 'sharp' | 'slic' | 'block' | 'floyd' | 'atkinson' | 'bayer'
 
 export const ALGO_OPTIONS: { id: ConvertAlgo; label: string; desc: string }[] = [
-  { id: 'native',   label: '原图像素 · 1:1',  desc: '图片本身是像素画时，按原始像素直接导入，不缩放、不模糊（导入像素画会自动启用）' },
   { id: 'smooth',   label: '平滑取色',       desc: '双线性缩放后最近邻匹配，适合照片' },
   { id: 'avg',      label: '区域平均',        desc: '四倍中间帧降采样取均值，颜色过渡更柔和' },
   { id: 'sharp',    label: '锐利像素',        desc: '边缘保留降采样，线条与轮廓清晰不丢失，适合像素图/线稿/Logo' },
@@ -171,88 +170,6 @@ const BAYER4 = [
   [15, 7, 13,  5],
 ]
 
-export interface PixelArtInfo {
-  isPixelArt: boolean
-  nativeW: number
-  nativeH: number
-  scaleX: number
-  scaleY: number
-}
-
-/**
- * Detect whether an image is pixel art and, if so, its native pixel
- * resolution. Upscaled pixel art (a small sprite saved large) is found by
- * run-length analysis — every run of identical pixels is an integer multiple
- * of the upscale factor. Native-resolution pixel art is recognised by being
- * small with few distinct colors.
- */
-export function detectPixelArt(img: HTMLImageElement): PixelArtInfo {
-  const w0 = img.naturalWidth || img.width
-  const h0 = img.naturalHeight || img.height
-  const fail: PixelArtInfo = { isPixelArt: false, nativeW: w0, nativeH: h0, scaleX: 1, scaleY: 1 }
-  // too large to be a practical 1:1 bead pattern → don't treat as pixel art
-  if (w0 < 2 || h0 < 2 || Math.max(w0, h0) > 1024) return fail
-
-  const cv = document.createElement('canvas')
-  cv.width = w0
-  cv.height = h0
-  const ctx = cv.getContext('2d', { willReadFrequently: true })!
-  ctx.imageSmoothingEnabled = false
-  ctx.drawImage(img, 0, 0)
-  const d = ctx.getImageData(0, 0, w0, h0).data
-
-  const same = (i: number, j: number) =>
-    d[i] === d[j] && d[i + 1] === d[j + 1] && d[i + 2] === d[j + 2] && d[i + 3] === d[j + 3]
-
-  // smallest interior run length along one axis (= the upscale factor, if any)
-  const blockSize = (axis: 'x' | 'y'): number => {
-    const runs: number[] = []
-    const major = axis === 'x' ? w0 : h0
-    const minor = axis === 'x' ? h0 : w0
-    const step = Math.max(1, Math.floor(minor / 64))   // sample ~64 lines
-    for (let m = 0; m < minor; m += step) {
-      let runStart = 0
-      for (let k = 1; k <= major; k++) {
-        const cur  = axis === 'x' ? (m * w0 + k) * 4 : (k * w0 + m) * 4
-        const prev = axis === 'x' ? (m * w0 + (k - 1)) * 4 : ((k - 1) * w0 + m) * 4
-        if (k === major || !same(cur, prev)) {
-          // drop edge runs (partial blocks) and full-line runs (no info)
-          if (runStart > 0 && k < major) runs.push(k - runStart)
-          runStart = k
-        }
-      }
-    }
-    if (runs.length < 16) return 1
-    let minRun = Infinity
-    for (const r of runs) if (r < minRun) minRun = r
-    if (minRun < 2 || minRun > major / 2) return 1
-    // confirm: nearly all runs are integer multiples of the smallest one
-    let ok = 0
-    for (const r of runs) if (r % minRun === 0) ok++
-    return ok / runs.length >= 0.92 ? minRun : 1
-  }
-
-  const scaleX = blockSize('x')
-  const scaleY = blockSize('y')
-  const nativeW = Math.max(1, Math.round(w0 / scaleX))
-  const nativeH = Math.max(1, Math.round(h0 / scaleY))
-
-  // count distinct opaque colors (cap the scan once clearly past the threshold)
-  const colors = new Set<number>()
-  for (let i = 0; i < d.length && colors.size <= 260; i += 4) {
-    if (d[i + 3] < 128) continue
-    colors.add((d[i] << 16) | (d[i + 1] << 8) | d[i + 2])
-  }
-
-  const isUpscaled = scaleX >= 2 && scaleY >= 2
-  const isSmallFlat = Math.max(w0, h0) <= 160 && colors.size <= 256
-  let isPixelArt = isUpscaled || isSmallFlat
-  // a 1:1 bead grid larger than this is impractical
-  if (nativeW > 220 || nativeH > 220) isPixelArt = false
-
-  return { isPixelArt, nativeW, nativeH, scaleX, scaleY }
-}
-
 /**
  * Convert an image to a bead grid restricted to `palette` (the selected kit).
  * `algo` = pixelation strategy, `metric` = how out-of-kit colors are matched.
@@ -264,27 +181,6 @@ export function imageToGrid(
   algo: ConvertAlgo = 'smooth',
   metric: MatchMetric = 'lab',
 ): PerlerGrid {
-  // ---- native: 1:1 pixel-art import — each source pixel → one bead,
-  // nearest-neighbour (no blur), grid size from the image (ignores targetWidth)
-  if (algo === 'native') {
-    const pa = detectPixelArt(img)
-    const nw = pa.nativeW, nh = pa.nativeH
-    const cv = document.createElement('canvas')
-    cv.width = nw
-    cv.height = nh
-    const ctx = cv.getContext('2d', { willReadFrequently: true })!
-    ctx.imageSmoothingEnabled = false
-    ctx.clearRect(0, 0, nw, nh)
-    ctx.drawImage(img, 0, 0, nw, nh)
-    const data = ctx.getImageData(0, 0, nw, nh).data
-    const ncells: (string | null)[] = new Array(nw * nh)
-    for (let i = 0; i < nw * nh; i++) {
-      if (data[i * 4 + 3] < 128) { ncells[i] = null; continue }
-      ncells[i] = nearestColor(data[i * 4], data[i * 4 + 1], data[i * 4 + 2], palette, metric).code
-    }
-    return { width: nw, height: nh, cells: ncells }
-  }
-
   const ratio = (img.naturalHeight || img.height) / (img.naturalWidth || img.width)
   const w = Math.max(1, Math.round(targetWidth))
   const h = Math.max(1, Math.round(w * ratio))
