@@ -129,7 +129,12 @@
           <button v-for="t in tools" :key="t.id"
                   class="rail-btn" :class="{ on: tool === t.id }"
                   :title="`${t.label} (${t.key})`"
-                  @click="tool = t.id">{{ t.icon }}</button>
+                  @click="tool = t.id">
+            <svg class="tool-ico" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round"
+                 v-html="t.svg"></svg>
+          </button>
         </div>
         <div class="canvas-main">
         <!-- Toolbar -->
@@ -677,19 +682,50 @@ const fullscreen = ref(false)   // canvas fills the whole viewport
 const showColorPanel = ref(false)   // floating palette — usable while fullscreen
 const colorPanelTop = ref(56)       // panel top offset (below the toolbars)
 
-const tools: { id: Tool; icon: string; label: string; key: string }[] = [
-  { id: 'paint',     icon: '🖌', label: '画笔', key: 'B' },
-  { id: 'erase',     icon: '🧽', label: '橡皮', key: 'E' },
-  { id: 'wand',      icon: '🪄', label: '魔棒画笔', key: 'G' },
-  { id: 'wanderase', icon: '🧹', label: '魔棒橡皮', key: 'D' },
-  { id: 'replace',   icon: '🔁', label: '同色替换', key: 'R' },
-  { id: 'line',      icon: '╱', label: '直线', key: 'L' },
-  { id: 'rect',      icon: '▭', label: '矩形', key: 'U' },
-  { id: 'ellipse',   icon: '◯', label: '椭圆 / 圆', key: 'O' },
-  { id: 'mirror',    icon: '🪞', label: '镜像复制', key: 'M' },
-  { id: 'select',    icon: '⬚', label: '选区移动', key: 'S' },
-  { id: 'pick',      icon: '💉', label: '取色', key: 'I' },
-  { id: 'pan',       icon: '✋', label: '移动', key: 'H' },
+// SAI / Photoshop-style monochrome glyphs (24×24 viewBox, currentColor).
+const tools: { id: Tool; svg: string; label: string; key: string }[] = [
+  { id: 'paint', label: '画笔', key: 'B', svg:
+    '<path d="M18.37 2.63 14 7l-1.59-1.59a2 2 0 0 0-2.82 0L8 7l9 9 1.59-1.59a2 2 0 0 0 0-2.82L17 10l4.37-4.37a2.12 2.12 0 1 0-3-3Z"/>' +
+    '<path d="M9 8c-2 3-4 3.5-7 4l8 10c2-1 6-5 6-7"/>' +
+    '<path d="M14.5 17.5 4.5 15"/>' },
+  { id: 'erase', label: '橡皮', key: 'E', svg:
+    '<path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/>' +
+    '<path d="M22 21H7"/><path d="m5 11 9 9"/>' },
+  { id: 'wand', label: '魔棒画笔', key: 'G', svg:
+    '<path d="M3.5 20.5 13 11" stroke-width="2.6"/>' +
+    '<path d="M17 2.8 18.5 6.5 22.2 8 18.5 9.5 17 13.2 15.5 9.5 11.8 8 15.5 6.5Z" fill="currentColor" stroke="none"/>' +
+    '<circle cx="6.6" cy="6" r="1.1" fill="currentColor" stroke="none"/>' },
+  { id: 'wanderase', label: '魔棒橡皮', key: 'D', svg:
+    '<path d="M3.5 20.5 14.5 9.5" stroke-width="2.6"/>' +
+    '<circle cx="15.8" cy="8.2" r="1.4" fill="currentColor" stroke="none"/>' +
+    '<circle cx="17.6" cy="18" r="5.2" fill="currentColor" stroke="none"/>' +
+    '<path d="M15 18h5.2" stroke="#fff" stroke-width="2.3"/>' },
+  { id: 'replace', label: '同色替换', key: 'R', svg:
+    '<path d="M14 4a2 2 0 0 1 2-2"/><path d="M16 10a2 2 0 0 1-2-2"/>' +
+    '<path d="M20 2a2 2 0 0 1 2 2"/><path d="M22 8a2 2 0 0 1-2 2"/>' +
+    '<path d="m3 7 3 3 3-3"/><path d="M6 10V5a3 3 0 0 1 3-3h1"/>' +
+    '<rect x="2.5" y="14" width="8" height="8" rx="2"/>' },
+  { id: 'line', label: '直线', key: 'L', svg:
+    '<path d="M5 19 19 5"/>' +
+    '<circle cx="5" cy="19" r="2.3" fill="currentColor" stroke="none"/>' +
+    '<circle cx="19" cy="5" r="2.3" fill="currentColor" stroke="none"/>' },
+  { id: 'rect', label: '矩形', key: 'U', svg:
+    '<rect x="3.5" y="5.5" width="17" height="13" rx="1"/>' },
+  { id: 'ellipse', label: '椭圆 / 圆', key: 'O', svg:
+    '<ellipse cx="12" cy="12" rx="9.2" ry="7"/>' },
+  { id: 'mirror', label: '镜像复制', key: 'M', svg:
+    '<path d="m3 7 5 5-5 5V7"/><path d="m21 7-5 5 5 5V7"/>' +
+    '<path d="M12 20v2"/><path d="M12 14v2"/><path d="M12 8v2"/><path d="M12 2v2"/>' },
+  { id: 'select', label: '选区移动', key: 'S', svg:
+    '<rect x="3.5" y="3.5" width="17" height="17" rx="1" stroke-dasharray="3.2 3"/>' },
+  { id: 'pick', label: '取色', key: 'I', svg:
+    '<rect x="14" y="2.6" width="7.2" height="7.2" rx="2.2" transform="rotate(45 17.6 6.2)" fill="currentColor" stroke="none"/>' +
+    '<path d="M15.6 8.4 3.6 20.4" stroke-width="2.6"/>' },
+  { id: 'pan', label: '移动', key: 'H', svg:
+    '<path d="M18 11V6a2 2 0 0 0-4 0"/>' +
+    '<path d="M14 10V4a2 2 0 0 0-4 0v2"/>' +
+    '<path d="M10 10.5V6a2 2 0 0 0-4 0v8"/>' +
+    '<path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/>' },
 ]
 
 // ---- shape tools (line / rect / ellipse) ----
@@ -2907,19 +2943,17 @@ watch(grid, () => { clearSelection(); render() })
 .canvas-body { display: flex; align-items: stretch; }
 .canvas-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 
-/* SAI-style tool rail — vertical 2-column tool panel on the left */
+/* SAI-style tool rail — single-column vertical tool panel on the left */
 .tool-rail {
   flex: 0 0 auto;
-  display: grid;
-  grid-template-columns: repeat(2, 30px);
+  display: flex;
+  flex-direction: column;
   gap: 4px;
-  align-content: start;
   padding: 6px;
   background: var(--cream-2);
   border-right: 2px solid var(--line-strong);
 }
 .rail-title {
-  grid-column: 1 / -1;
   font-size: 0.62rem;
   font-weight: 800;
   letter-spacing: 0.08em;
@@ -2928,20 +2962,27 @@ watch(grid, () => { clearSelection(); render() })
   padding: 1px 0 2px;
 }
 .rail-btn {
-  width: 30px; height: 30px;
+  width: 34px; height: 34px;
   border: 1.5px solid var(--cream-4);
   background: #fff;
+  color: var(--plum-2);
   border-radius: 5px;
   cursor: pointer;
-  font-size: 0.92rem;
   display: flex; align-items: center; justify-content: center;
-  transition: background var(--transition-fast), border-color var(--transition-fast);
+  transition: background var(--transition-fast), border-color var(--transition-fast),
+              color var(--transition-fast);
 }
 .rail-btn:hover { border-color: var(--sakura); }
 .rail-btn.on {
   background: var(--sakura);
   border-color: var(--sakura-deep);
+  color: var(--plum-1);
   box-shadow: inset 0 1px 5px rgba(74,54,69,0.28);
+}
+.tool-ico {
+  width: 21px; height: 21px;
+  display: block;
+  pointer-events: none;
 }
 
 /* fullscreen canvas — teleported to #app, covers the whole viewport */
