@@ -122,14 +122,18 @@
            in #app's stacking context so modal dialogs (z-index 100) stay above -->
       <Teleport to="#app" :disabled="!fullscreen">
       <div class="canvas-col card" :class="{ fullscreen }">
+       <div class="canvas-body">
+        <!-- SAI-style tool rail -->
+        <div class="tool-rail">
+          <div class="rail-title">工具</div>
+          <button v-for="t in tools" :key="t.id"
+                  class="rail-btn" :class="{ on: tool === t.id }"
+                  :title="`${t.label} (${t.key})`"
+                  @click="tool = t.id">{{ t.icon }}</button>
+        </div>
+        <div class="canvas-main">
         <!-- Toolbar -->
         <div class="toolbar">
-          <div class="tool-group">
-            <button v-for="t in tools" :key="t.id"
-                    class="tool-btn" :class="{ on: tool === t.id }"
-                    :title="`${t.label} (${t.key})`"
-                    @click="tool = t.id">{{ t.icon }}</button>
-          </div>
           <!-- brush / eraser size — Shift + wheel -->
           <div class="size-tag" v-show="tool === 'paint' || tool === 'erase'"
                title="按住 Shift + 滚轮调整大小">
@@ -157,6 +161,14 @@
                   title="把画布裁剪到当前选区范围（区外丢弃）">
             ◳ 裁剪选区
           </button>
+          <!-- shape tool options -->
+          <div class="size-tag sel-hint" v-show="isShapeTool(tool)">
+            <label class="shape-fill-opt" title="勾选则填充，否则只画轮廓">
+              <input type="checkbox" v-model="shapeFill" />
+              <span>填充</span>
+            </label>
+            <span class="size-hint">拖拽绘制 · Shift 约束正方/正圆/水平</span>
+          </div>
           <div class="tool-divider"></div>
           <div class="tool-group">
             <button class="tool-btn" title="撤销 (Ctrl+Z)"
@@ -333,10 +345,13 @@
           <div v-if="transforming" class="xform-bar">
             <span class="xform-title">自由变换</span>
             <span class="xform-info mono">缩放 {{ xformScalePct }}% · 旋转 {{ xformAngleDeg }}°</span>
+            <span class="xform-hint">角手柄按 Shift 等比</span>
             <button class="btn btn-sm btn-primary" @click="applyTransform">✓ 应用</button>
             <button class="btn btn-sm btn-ghost" @click="cancelTransform">✕ 取消</button>
           </div>
         </div>
+        </div>
+       </div>
 
         <!-- Floating palette — selectable even in fullscreen mode -->
         <div v-if="showColorPanel" class="color-panel" :style="{ top: colorPanelTop + 'px' }">
@@ -578,7 +593,8 @@ import BeadShopDialog from '../components/BeadShopDialog.vue'
 import BeadPalettePicker from '../components/BeadPalettePicker.vue'
 import BeadImageCropDialog from '../components/BeadImageCropDialog.vue'
 
-type Tool = 'paint' | 'erase' | 'wand' | 'wanderase' | 'replace' | 'pick' | 'pan' | 'mirror' | 'select'
+type Tool = 'paint' | 'erase' | 'wand' | 'wanderase' | 'replace' | 'pick' | 'pan' | 'mirror'
+          | 'select' | 'line' | 'rect' | 'ellipse'
 type BeadShape = 'circle' | 'square' | 'fill'
 
 // ---- state ----
@@ -667,11 +683,23 @@ const tools: { id: Tool; icon: string; label: string; key: string }[] = [
   { id: 'wand',      icon: '🪄', label: '魔棒画笔', key: 'G' },
   { id: 'wanderase', icon: '🧹', label: '魔棒橡皮', key: 'D' },
   { id: 'replace',   icon: '🔁', label: '同色替换', key: 'R' },
+  { id: 'line',      icon: '╱', label: '直线', key: 'L' },
+  { id: 'rect',      icon: '▭', label: '矩形', key: 'U' },
+  { id: 'ellipse',   icon: '◯', label: '椭圆 / 圆', key: 'O' },
   { id: 'mirror',    icon: '🪞', label: '镜像复制', key: 'M' },
   { id: 'select',    icon: '⬚', label: '选区移动', key: 'S' },
   { id: 'pick',      icon: '💉', label: '取色', key: 'I' },
   { id: 'pan',       icon: '✋', label: '移动', key: 'H' },
 ]
+
+// ---- shape tools (line / rect / ellipse) ----
+const shapeFill = ref(false)            // shape tools: filled vs outline
+let shapeDragging = false
+let shapeStart: { x: number; y: number } | null = null
+let shapeEnd: { x: number; y: number } | null = null
+let shapeShift = false                  // Shift held during the current drag
+const SHAPE_TOOLS = ['line', 'rect', 'ellipse']
+const isShapeTool = (t: Tool) => SHAPE_TOOLS.includes(t)
 
 // ---- rectangular selection (marquee + move) ----
 const selection = ref<{ x: number; y: number; w: number; h: number } | null>(null)
@@ -1616,10 +1644,16 @@ function transformOnMove(e: MouseEvent) {
     const i = xDrag.handle
     const xActive = i <= 3 || i === 5 || i === 7
     const yActive = i <= 3 || i === 4 || i === 6
-    const halfW = xActive ? Math.max(0.5, Math.abs(du) / 2) : b0.halfW
-    const halfH = yActive ? Math.max(0.5, Math.abs(dv) / 2) : b0.halfH
-    const uComp = xActive ? du / 2 : -xDrag.anchorLocal.x
-    const vComp = yActive ? dv / 2 : -xDrag.anchorLocal.y
+    let halfW = xActive ? Math.max(0.5, Math.abs(du) / 2) : b0.halfW
+    let halfH = yActive ? Math.max(0.5, Math.abs(dv) / 2) : b0.halfH
+    // Shift on a corner handle → uniform (proportional) scaling
+    if (e.shiftKey && i <= 3 && b0.halfW > 1e-4 && b0.halfH > 1e-4) {
+      const s = Math.max(halfW / b0.halfW, halfH / b0.halfH)
+      halfW = b0.halfW * s
+      halfH = b0.halfH * s
+    }
+    const uComp = xActive ? (du >= 0 ? halfW : -halfW) : -xDrag.anchorLocal.x
+    const vComp = yActive ? (dv >= 0 ? halfH : -halfH) : -xDrag.anchorLocal.y
     xbox.value = {
       cx: xDrag.anchor.x + uComp * ux + vComp * vx,
       cy: xDrag.anchor.y + uComp * uy + vComp * vy,
@@ -2043,6 +2077,114 @@ function applyResize() {
   ElMessage.success(`画布已调整为 ${nw} × ${nh}`)
 }
 
+// ---- shape tools: rasterization ----
+function lineCells(x0: number, y0: number, x1: number, y1: number): number[][] {
+  const pts: number[][] = []
+  const dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0)
+  const sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1
+  let err = dx - dy, x = x0, y = y0
+  for (;;) {
+    pts.push([x, y])
+    if (x === x1 && y === y1) break
+    const e2 = 2 * err
+    if (e2 > -dy) { err -= dy; x += sx }
+    if (e2 < dx) { err += dx; y += sy }
+  }
+  return pts
+}
+function rectCells(x0: number, y0: number, x1: number, y1: number, filled: boolean): number[][] {
+  const lx = Math.min(x0, x1), rx = Math.max(x0, x1)
+  const ty = Math.min(y0, y1), by = Math.max(y0, y1)
+  const pts: number[][] = []
+  if (filled) {
+    for (let y = ty; y <= by; y++) for (let x = lx; x <= rx; x++) pts.push([x, y])
+  } else {
+    for (let x = lx; x <= rx; x++) { pts.push([x, ty]); pts.push([x, by]) }
+    for (let y = ty + 1; y < by; y++) { pts.push([lx, y]); pts.push([rx, y]) }
+  }
+  return pts
+}
+function ellipseCells(x0: number, y0: number, x1: number, y1: number, filled: boolean): number[][] {
+  const lx = Math.min(x0, x1), rx = Math.max(x0, x1)
+  const ty = Math.min(y0, y1), by = Math.max(y0, y1)
+  const cx = (lx + rx) / 2, cy = (ty + by) / 2
+  const a = Math.max(0.5, (rx - lx) / 2), b = Math.max(0.5, (by - ty) / 2)
+  const inside = (x: number, y: number) => {
+    const u = (x - cx) / a, v = (y - cy) / b
+    return u * u + v * v <= 1
+  }
+  const pts: number[][] = []
+  for (let y = ty; y <= by; y++) {
+    for (let x = lx; x <= rx; x++) {
+      if (!inside(x, y)) continue
+      if (filled || !inside(x - 1, y) || !inside(x + 1, y)
+          || !inside(x, y - 1) || !inside(x, y + 1)) pts.push([x, y])
+    }
+  }
+  return pts
+}
+/** Apply the Shift constraint to the current shape end point. */
+function constrainedShapeEnd(): { x: number; y: number } {
+  const s = shapeStart!, e = shapeEnd!
+  if (!shapeShift) return e
+  const dx = e.x - s.x, dy = e.y - s.y
+  if (tool.value === 'line') {
+    const ax = Math.abs(dx), ay = Math.abs(dy)
+    if (ax > ay * 2) return { x: e.x, y: s.y }            // horizontal
+    if (ay > ax * 2) return { x: s.x, y: e.y }            // vertical
+    const d = Math.max(ax, ay)                            // 45°
+    return { x: s.x + Math.sign(dx) * d, y: s.y + Math.sign(dy) * d }
+  }
+  const d = Math.max(Math.abs(dx), Math.abs(dy))          // square bbox
+  return { x: s.x + (dx < 0 ? -d : d), y: s.y + (dy < 0 ? -d : d) }
+}
+function currentShapeCells(): number[][] {
+  if (!shapeStart || !shapeEnd) return []
+  const e = constrainedShapeEnd()
+  if (tool.value === 'line') return lineCells(shapeStart.x, shapeStart.y, e.x, e.y)
+  if (tool.value === 'rect') return rectCells(shapeStart.x, shapeStart.y, e.x, e.y, shapeFill.value)
+  return ellipseCells(shapeStart.x, shapeStart.y, e.x, e.y, shapeFill.value)
+}
+function clampCell(raw: { x: number; y: number }): { x: number; y: number } {
+  const g = grid.value!
+  return {
+    x: Math.max(0, Math.min(g.width - 1, raw.x)),
+    y: Math.max(0, Math.min(g.height - 1, raw.y)),
+  }
+}
+function shapeOnDown(e: MouseEvent) {
+  if (!grid.value) return
+  const c = clampCell(cellAtRaw(e))
+  shapeStart = c
+  shapeEnd = c
+  shapeShift = e.shiftKey
+  shapeDragging = true
+  hover.value = null
+  render()
+}
+function shapeOnMove(e: MouseEvent) {
+  if (!grid.value || !shapeDragging) return
+  shapeEnd = clampCell(cellAtRaw(e))
+  shapeShift = e.shiftKey
+  render()
+}
+function shapeOnUp(e: MouseEvent) {
+  const g = grid.value
+  if (!g || !shapeDragging) { shapeDragging = false; return }
+  shapeShift = e.shiftKey
+  const cells = currentShapeCells()
+  shapeDragging = false
+  shapeStart = null
+  shapeEnd = null
+  if (cells.length === 0 || !currentCode.value) { render(); return }
+  pushHistory()
+  for (const [x, y] of cells) {
+    if (x >= 0 && x < g.width && y >= 0 && y < g.height) g.cells[y * g.width + x] = currentCode.value
+  }
+  gridVersion.value++
+  render()
+}
+
 function onDown(e: MouseEvent) {
   if (transforming.value) { transformOnDown(e); return }
   if (tool.value === 'pan' || e.button === 1) {
@@ -2051,6 +2193,7 @@ function onDown(e: MouseEvent) {
     return
   }
   if (tool.value === 'select') { selectOnDown(e); return }
+  if (isShapeTool(tool.value)) { shapeOnDown(e); return }
   const cell = cellAt(e)
   if (cell) {
     // snapshot once per action so Ctrl+Z reverts the whole stroke
@@ -2071,6 +2214,7 @@ function onMove(e: MouseEvent) {
     return
   }
   if (selMode !== 'none') { selectOnMove(e); return }
+  if (shapeDragging) { shapeOnMove(e); return }
   const cell = cellAt(e)
   hover.value = cell
   if (cell) {
@@ -2086,14 +2230,16 @@ function onMove(e: MouseEvent) {
     render()
   }
 }
-function onUp() {
+function onUp(e: MouseEvent) {
   if (transforming.value) { xDrag = null; return }
   if (selMode !== 'none') { finishSelDrag(); return }
+  if (shapeDragging) { shapeOnUp(e); return }
   painting = false; panning = false
 }
-function onLeave() {
+function onLeave(e: MouseEvent) {
   if (transforming.value) { xDrag = null; return }
   if (selMode !== 'none') { finishSelDrag(); return }
+  if (shapeDragging) { shapeOnUp(e); return }
   painting = false; panning = false; hover.value = null; render()
 }
 
@@ -2205,6 +2351,14 @@ function render() {
   if (selection.value && !transforming.value) {
     if (selMode === 'move' && selBuf) drawSelFloat(ctx, cell, ox, oy)
     drawMarquee(ctx, cell, ox, oy)
+  }
+
+  // shape-tool drag preview
+  if (shapeDragging && !transforming.value) {
+    const hex = curColorHex.value
+    for (const [sx, sy] of currentShapeCells()) {
+      drawBead(ctx, ox + sx * cell, oy + sy * cell, cell, hex, beadShape.value)
+    }
   }
 
   // free-transform preview
@@ -2576,6 +2730,9 @@ function onKeyDown(e: KeyboardEvent) {
     case 'g': tool.value = 'wand'; break
     case 'd': tool.value = 'wanderase'; break
     case 'r': tool.value = 'replace'; break
+    case 'l': tool.value = 'line'; break
+    case 'u': tool.value = 'rect'; break
+    case 'o': tool.value = 'ellipse'; break
     case 'm': tool.value = 'mirror'; break
     case 's': tool.value = 'select'; break
     case 'i': tool.value = 'pick'; break
@@ -2747,8 +2904,47 @@ watch(grid, () => { clearSelection(); render() })
 @media (max-width: 1000px) { .workspace { grid-template-columns: 1fr; } }
 
 .canvas-col { padding: 0; overflow: hidden; position: relative; }
+.canvas-body { display: flex; align-items: stretch; }
+.canvas-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 
-/* fullscreen canvas — teleported to <body>, covers the whole viewport */
+/* SAI-style tool rail — vertical 2-column tool panel on the left */
+.tool-rail {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: repeat(2, 30px);
+  gap: 4px;
+  align-content: start;
+  padding: 6px;
+  background: var(--cream-2);
+  border-right: 2px solid var(--line-strong);
+}
+.rail-title {
+  grid-column: 1 / -1;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--plum-3);
+  text-align: center;
+  padding: 1px 0 2px;
+}
+.rail-btn {
+  width: 30px; height: 30px;
+  border: 1.5px solid var(--cream-4);
+  background: #fff;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 0.92rem;
+  display: flex; align-items: center; justify-content: center;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+.rail-btn:hover { border-color: var(--sakura); }
+.rail-btn.on {
+  background: var(--sakura);
+  border-color: var(--sakura-deep);
+  box-shadow: inset 0 1px 5px rgba(74,54,69,0.28);
+}
+
+/* fullscreen canvas — teleported to #app, covers the whole viewport */
 .canvas-col.fullscreen {
   position: fixed;
   inset: 0;
@@ -2759,10 +2955,24 @@ watch(grid, () => { clearSelection(); render() })
   display: flex;
   flex-direction: column;
 }
+.canvas-col.fullscreen .canvas-body { flex: 1 1 auto; min-height: 0; }
 .canvas-col.fullscreen .canvas-wrap {
   flex: 1 1 auto;
   height: auto;
   min-height: 0;
+}
+
+/* shape-tool fill option */
+.shape-fill-opt {
+  display: inline-flex; align-items: center; gap: 0.25rem;
+  cursor: pointer; font-weight: 700; color: var(--plum-1);
+}
+.shape-fill-opt input { cursor: pointer; }
+.xform-hint {
+  font-size: 0.66rem; color: var(--plum-3);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-pill);
+  padding: 0 0.4rem;
 }
 
 .toolbar {
