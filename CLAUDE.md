@@ -48,10 +48,16 @@
 - `frontend/src/views/MardCards.vue` — MARD 色卡浏览（8 档套装：24/48/72/96/120/144/216/264）。
 - `frontend/src/components/BeadPalettePicker.vue` — 自定义色板选择弹窗
   （全部色号方块、按 A/B/C… 系列分类、可勾选）。
-- `frontend/src/components/BeadExportDialog.vue` — 导出弹窗（选格式 + 导出预览图，样式跟随画布）。
-- `frontend/src/composables/usePerler.ts` — 转换逻辑：8 种生成算法
-  (smooth/avg/sharp/slic/block/floyd/atkinson/bayer)、4 种平替算法
+- `frontend/src/components/BeadExportDialog.vue` — 导出弹窗（多选格式 + 网格线开关 + 导出预览图）。
+- `frontend/src/components/BeadImageCropDialog.vue` — PS 式原图裁剪弹窗（8 手柄裁剪框、框外变暗、三分线，应用后裁原图并重转换）。
+- `frontend/src/composables/usePerler.ts` — 转换逻辑：9 种生成算法
+  (pixelfit/smooth/avg/sharp/slic/block/floyd/atkinson/bayer)、4 种平替算法
   (lab/weighted/hue/luma)。
+  `pixelfit`（像素图智能修正）移植自 theamusing/perfectPixel：用 Sobel 梯度
+  投影找峰、中位间距估出网格数，再从画布中心向外逐线吸附到边缘对齐网格，
+  最后每格中位数采样 —— 把像素风/AI 生成的歪斜图修正成干净网格（尺寸自动
+  检测、忽略宽度设置；检测失败回退 smooth）。代码在 `usePixelFit.ts`。
+  （上游用 FFT 频域检测，移植到 JS 会锁错到频率谐波，故改用其梯度法。）
   `sharp` 为边缘保留降采样（高分辨率重采样 + 暗簇优先，保轮廓）；
   `slic` 为 SLIC 超像素聚类（CIELAB+xy 空间，相似区域合并为扁平色块）；
   `block` 为色块归并（量化后 3×3 邻域多数表决迭代，相邻像素尽量同色）；
@@ -97,6 +103,9 @@
     裁到选区范围（区外丢弃、网格尺寸变为选区大小，可撤销）。
   - 画布尺寸：工具栏「📐 画布尺寸」弹窗 `applyResize` 同时改宽高 + 九宫格
     锚点，图案 1:1 不缩放放进新画布——放大留空格、缩小裁切，比例不变。
+  - 图片裁剪：「转换图片」卡片「✂️ 裁剪图片」开 `BeadImageCropDialog`，PS 式
+    拖手柄裁原图，应用后裁切原图并重新转换。
+  - 像素图智能修正：算法选「像素图智能修正 ✦」即用 `pixelfit`（见 usePerler）。
   - 全屏画布：工具栏 ⛶ 按钮 / F 键切换，`.canvas-col` 经 `<Teleport to="#app">`
     传送出去后 `position:fixed` 占满视口（必须传送——`.main>*` 的 `pop-in`
     动画 `both` 残留 transform 会困住 fixed）。导出/购买弹窗同样 `Teleport`
@@ -111,9 +120,11 @@
     S 选区 / I 取色 / H·空格 移动 / F 全屏 / Shift+滚轮 笔刷大小 /
     +- 缩放 / 0 适应 / Ctrl+Z 撤销 / 变换中 Enter 应用·Esc 取消。
   - 「标色号」勾选后**实时**在画布每颗豆上显示色号。
-  - 导出 PNG/JPG/SVG/CSV —— 所见即所得，跟随画布当前豆型与标色号，无镜像选项。
-    导出弹窗内含**导出预览图**（`buildPatternCanvas` 复用导出渲染、缩放出
-    data-URL，所见即下载的样子）。
+  - 导出 PNG/JPG/SVG/CSV —— 所见即所得，跟随画布当前豆型与标色号。导出弹窗
+    **可多选格式一次导出多个文件**（`handleExport` 按 300ms 错开下载），
+    并有「网格线与坐标尺」开关 —— `buildPatternCanvas(cell, withGrid)` 的
+    `withGrid` 控制网格线/十格粗线/标尺的有无（关掉得纯净图案）。导出弹窗
+    内含**导出预览图**（带/不带网格线两版，随开关实时切换）。
   - 缺色对比(缺色→平替)。
 
 ## 其它功能区

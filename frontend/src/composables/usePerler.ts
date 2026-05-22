@@ -3,6 +3,7 @@
    ================================================================ */
 
 import { MARD_COLORS, type BeadColor } from '../data/mardPalettes'
+import { pixelFitGrid } from './usePixelFit'
 
 export interface PerlerGrid {
   width: number
@@ -11,9 +12,10 @@ export interface PerlerGrid {
 }
 
 /** Pixelation algorithms. */
-export type ConvertAlgo = 'smooth' | 'avg' | 'sharp' | 'slic' | 'block' | 'floyd' | 'atkinson' | 'bayer'
+export type ConvertAlgo = 'smooth' | 'avg' | 'sharp' | 'slic' | 'block' | 'floyd' | 'atkinson' | 'bayer' | 'pixelfit'
 
 export const ALGO_OPTIONS: { id: ConvertAlgo; label: string; desc: string }[] = [
+  { id: 'pixelfit', label: '像素图智能修正 ✦', desc: 'Perfect Pixel 算法：用 Sobel 边缘自动识别像素画网格并逐线对齐，把像素风/AI 生成的歪斜图修正成干净网格（尺寸自动检测，忽略宽度设置）' },
   { id: 'smooth',   label: '平滑取色',       desc: '双线性缩放后最近邻匹配，适合照片' },
   { id: 'avg',      label: '区域平均',        desc: '四倍中间帧降采样取均值，颜色过渡更柔和' },
   { id: 'sharp',    label: '锐利像素',        desc: '边缘保留降采样，线条与轮廓清晰不丢失，适合像素图/线稿/Logo' },
@@ -181,6 +183,21 @@ export function imageToGrid(
   algo: ConvertAlgo = 'smooth',
   metric: MatchMetric = 'lab',
 ): PerlerGrid {
+  // ---- pixelfit: auto-detect the pixel grid (Perfect Pixel algorithm) ----
+  // Output size is detected from the image, so targetWidth is ignored here.
+  if (algo === 'pixelfit') {
+    const fit = pixelFitGrid(img)
+    if (fit && fit.width >= 2 && fit.height >= 2 && fit.width <= 300 && fit.height <= 300) {
+      const cells: (string | null)[] = new Array(fit.width * fit.height)
+      for (let i = 0; i < cells.length; i++) {
+        const c = fit.cells[i]
+        cells[i] = c ? nearestColor(c[0], c[1], c[2], palette, metric).code : null
+      }
+      return { width: fit.width, height: fit.height, cells }
+    }
+    // detection failed → fall through to the normal (smooth) path below
+  }
+
   const ratio = (img.naturalHeight || img.height) / (img.naturalWidth || img.width)
   const w = Math.max(1, Math.round(targetWidth))
   const h = Math.max(1, Math.round(w * ratio))

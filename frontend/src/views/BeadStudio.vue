@@ -25,6 +25,10 @@
                   :disabled="converting" @click="convert(true)">
             {{ converting ? '转换中…' : '🔄 用当前图片重新转换' }}
           </button>
+          <button v-if="sourceImg" class="btn btn-ghost entry-btn"
+                  @click="showCropDialog = true">
+            ✂️ 裁剪图片
+          </button>
           <div class="entry-title">🖼️ 转换图片</div>
           <div class="entry-desc">选择或拖入一张图片，自动转换成拼豆图纸，导入后可在画布上继续编辑。</div>
         </div>
@@ -227,12 +231,14 @@
           <label class="pb-cell pb-wide">
             <span class="pb-label">网格宽度 · {{ grid.width }}×{{ grid.height }}</span>
             <input type="range" min="16" max="180" step="1"
-                   v-model.number="gridWidth" class="slider" />
+                   v-model.number="gridWidth" class="slider"
+                   :disabled="algo === 'pixelfit'" />
           </label>
           <label class="pb-cell">
             <span class="pb-label">豆数</span>
             <input type="number" min="16" max="180"
-                   v-model.number="gridWidth" class="input" />
+                   v-model.number="gridWidth" class="input"
+                   :disabled="algo === 'pixelfit'" />
           </label>
           <label class="pb-cell">
             <span class="pb-label">算法</span>
@@ -480,12 +486,10 @@
   <Teleport to="#app" :disabled="!fullscreen">
   <BeadExportDialog v-if="showExportDialog && grid"
     :grid="grid!" :bead-shape="beadShape" :total-beads="totalBeads"
-    :mard-colors="MARD_COLORS" :preview="exportPreview"
+    :mard-colors="MARD_COLORS"
+    :preview="exportPreview" :preview-plain="exportPreviewPlain"
     @close="showExportDialog = false"
-    @export-png="handleExportPng"
-    @export-jpg="handleExportJpg"
-    @export-svg="handleExportSvg"
-    @export-csv="handleExportCsv" />
+    @export="handleExport" />
   </Teleport>
 
   <!-- Shop Dialog -->
@@ -500,6 +504,14 @@
     :codes="myPaletteCodes"
     @apply="onPaletteApply"
     @close="showPalettePicker = false" />
+
+  <!-- Image-crop dialog -->
+  <Teleport to="#app" :disabled="!fullscreen">
+  <BeadImageCropDialog v-if="showCropDialog && sourcePreview"
+    :src="sourcePreview"
+    @close="showCropDialog = false"
+    @apply="onCropApply" />
+  </Teleport>
 
   <!-- Canvas-resize dialog -->
   <Teleport to="#app" :disabled="!fullscreen">
@@ -561,6 +573,7 @@ import BeadTabs from '../components/BeadTabs.vue'
 import BeadExportDialog from '../components/BeadExportDialog.vue'
 import BeadShopDialog from '../components/BeadShopDialog.vue'
 import BeadPalettePicker from '../components/BeadPalettePicker.vue'
+import BeadImageCropDialog from '../components/BeadImageCropDialog.vue'
 
 type Tool = 'paint' | 'erase' | 'wand' | 'wanderase' | 'replace' | 'pick' | 'pan' | 'mirror' | 'select'
 type BeadShape = 'circle' | 'square' | 'fill'
@@ -575,6 +588,8 @@ const sourceImg = shallowRef<HTMLImageElement | null>(null)
 const sourcePreview = ref('')
 const isDragging = ref(false)
 const showConvSettings = ref(false)   // collapsible advanced conversion settings
+const showCropDialog = ref(false)     // PS-style source-image crop dialog
+
 // ---- canvas-resize dialog (resize without scaling the pattern) ----
 const showResizeDialog = ref(false)
 const resizeW = ref(0)
@@ -615,7 +630,8 @@ const refFileInput = ref<HTMLInputElement | null>(null)
 const showExportDialog = ref(false)
 const showShopDialog = ref(false)
 const showPalettePicker = ref(false)
-const exportPreview = ref('')   // data-URL preview shown inside the export dialog
+const exportPreview = ref('')        // export-dialog preview — with grid lines
+const exportPreviewPlain = ref('')   // export-dialog preview — without grid lines
 
 // ---- undo / redo history ----
 interface GridSnap { width: number; height: number; cells: (string | null)[] }
@@ -798,6 +814,19 @@ function onProjectDrop(e: DragEvent) {
   if (f) openProjectFile(f)
 }
 
+// ---- image crop (PS-style) ----
+function onCropApply(payload: { dataUrl: string }) {
+  showCropDialog.value = false
+  const img = new Image()
+  img.onload = () => {
+    sourceImg.value = img
+    sourcePreview.value = payload.dataUrl
+    convert(true)   // re-convert from the cropped image
+  }
+  img.onerror = () => ElMessage.error('裁剪结果加载失败')
+  img.src = payload.dataUrl
+}
+
 /** Save the whole editable state as a .beadproj (JSON) project file. */
 function saveProject() {
   const g = grid.value
@@ -944,6 +973,8 @@ async function convert(refit = true) {
       algo.value, matchMetric.value,
     )
     gridVersion.value++
+    // 「像素图智能修正」尺寸由检测决定 —— 把宽度滑块同步过去
+    syncWidthFromGrid()
     if (refit) {
       // a fresh conversion from the button invalidates the edit history
       undoStack.length = 0
@@ -2234,15 +2265,17 @@ function drawBead(
 
 // ---- export ----
 /**
- * Build the full export-style pattern canvas (beads + grid lines + ruler) at a
- * given cell size. Shared by the PNG/JPEG export and the export-dialog preview.
+ * Build the export-style pattern canvas at a given cell size. `withGrid`
+ * controls whether grid lines + the every-10 ticks + the numbered ruler are
+ * drawn — off gives a clean beads-only image. Shared by export & preview.
  */
-function buildPatternCanvas(cell: number): HTMLCanvasElement {
+function buildPatternCanvas(cell: number, withGrid = true): HTMLCanvasElement {
   const g = grid.value!
   const labels = showLabels.value
+  const pad = withGrid ? RULER : 0
   const cv = document.createElement('canvas')
-  cv.width = RULER + g.width * cell
-  cv.height = RULER + g.height * cell
+  cv.width = pad + g.width * cell
+  cv.height = pad + g.height * cell
   const ctx = cv.getContext('2d')!
   ctx.fillStyle = '#ffffff'
   ctx.fillRect(0, 0, cv.width, cv.height)
@@ -2252,7 +2285,7 @@ function buildPatternCanvas(cell: number): HTMLCanvasElement {
   for (let y = 0; y < g.height; y++) {
     for (let x = 0; x < g.width; x++) {
       const code = g.cells[y * g.width + x]
-      const px = RULER + x * cell, py = RULER + y * cell
+      const px = pad + x * cell, py = pad + y * cell
       if (!code) {
         // empty cell: a small centered marker, smaller than the cell so empty
         // cells read clearly apart from filled beads
@@ -2273,95 +2306,97 @@ function buildPatternCanvas(cell: number): HTMLCanvasElement {
       }
     }
   }
-  // grid lines
-  ctx.strokeStyle = 'rgba(120,90,90,0.25)'
-  ctx.lineWidth = 1
-  ctx.beginPath()
-  for (let x = 0; x <= g.width; x++) {
-    ctx.moveTo(RULER + x * cell, RULER); ctx.lineTo(RULER + x * cell, cv.height)
+  if (withGrid) {
+    // grid lines
+    ctx.strokeStyle = 'rgba(120,90,90,0.25)'
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    for (let x = 0; x <= g.width; x++) {
+      ctx.moveTo(pad + x * cell, pad); ctx.lineTo(pad + x * cell, cv.height)
+    }
+    for (let y = 0; y <= g.height; y++) {
+      ctx.moveTo(pad, pad + y * cell); ctx.lineTo(cv.width, pad + y * cell)
+    }
+    ctx.stroke()
+    ctx.strokeStyle = 'rgba(232,70,42,0.6)'
+    ctx.lineWidth = 2
+    ctx.beginPath()
+    for (let x = 0; x <= g.width; x += 10) {
+      ctx.moveTo(pad + x * cell, pad); ctx.lineTo(pad + x * cell, cv.height)
+    }
+    for (let y = 0; y <= g.height; y += 10) {
+      ctx.moveTo(pad, pad + y * cell); ctx.lineTo(cv.width, pad + y * cell)
+    }
+    ctx.stroke()
+    // ruler numbers — stepped so small (preview) cells stay legible
+    const rstep = cell < 14 ? 10 : cell < 22 ? 5 : 1
+    ctx.fillStyle = '#fff'
+    ctx.fillRect(0, 0, cv.width, RULER)
+    ctx.fillRect(0, 0, RULER, cv.height)
+    ctx.font = '11px monospace'
+    ctx.textBaseline = 'middle'
+    for (let x = 0; x < g.width; x++) {
+      if (x % rstep) continue
+      ctx.fillStyle = (x % 10 === 0) ? '#e8462a' : '#aaa'
+      ctx.textAlign = 'center'
+      ctx.fillText(String(x + 1), RULER + x * cell + cell / 2, RULER / 2)
+    }
+    for (let y = 0; y < g.height; y++) {
+      if (y % rstep) continue
+      ctx.fillStyle = (y % 10 === 0) ? '#e8462a' : '#aaa'
+      ctx.textAlign = 'right'
+      ctx.fillText(String(y + 1), RULER - 4, RULER + y * cell + cell / 2)
+    }
+    ctx.fillStyle = '#fff'
+    ctx.fillRect(0, 0, RULER, RULER)
   }
-  for (let y = 0; y <= g.height; y++) {
-    ctx.moveTo(RULER, RULER + y * cell); ctx.lineTo(cv.width, RULER + y * cell)
-  }
-  ctx.stroke()
-  ctx.strokeStyle = 'rgba(232,70,42,0.6)'
-  ctx.lineWidth = 2
-  ctx.beginPath()
-  for (let x = 0; x <= g.width; x += 10) {
-    ctx.moveTo(RULER + x * cell, RULER); ctx.lineTo(RULER + x * cell, cv.height)
-  }
-  for (let y = 0; y <= g.height; y += 10) {
-    ctx.moveTo(RULER, RULER + y * cell); ctx.lineTo(cv.width, RULER + y * cell)
-  }
-  ctx.stroke()
-  // ruler numbers — stepped so small (preview) cells stay legible
-  const rstep = cell < 14 ? 10 : cell < 22 ? 5 : 1
-  ctx.fillStyle = '#fff'
-  ctx.fillRect(0, 0, cv.width, RULER)
-  ctx.fillRect(0, 0, RULER, cv.height)
-  ctx.font = '11px monospace'
-  ctx.textBaseline = 'middle'
-  for (let x = 0; x < g.width; x++) {
-    if (x % rstep) continue
-    ctx.fillStyle = (x % 10 === 0) ? '#e8462a' : '#aaa'
-    ctx.textAlign = 'center'
-    ctx.fillText(String(x + 1), RULER + x * cell + cell / 2, RULER / 2)
-  }
-  for (let y = 0; y < g.height; y++) {
-    if (y % rstep) continue
-    ctx.fillStyle = (y % 10 === 0) ? '#e8462a' : '#aaa'
-    ctx.textAlign = 'right'
-    ctx.fillText(String(y + 1), RULER - 4, RULER + y * cell + cell / 2)
-  }
-  ctx.fillStyle = '#fff'
-  ctx.fillRect(0, 0, RULER, RULER)
   return cv
 }
 
-/** Generic canvas export (PNG / JPEG) — mirrors the current canvas state. */
-function exportImage(mime: 'png' | 'jpeg', quality?: number) {
+/** Generic canvas export (PNG / JPEG). `withGrid` = include grid lines & ruler. */
+function exportImage(mime: 'png' | 'jpeg', quality: number | undefined, withGrid: boolean) {
   const g = grid.value
   if (!g) return
-  const cv = buildPatternCanvas(showLabels.value ? 42 : 26)
+  const cv = buildPatternCanvas(showLabels.value ? 42 : 26, withGrid)
   const ext = mime === 'jpeg' ? 'jpg' : 'png'
   const mimeType = mime === 'jpeg' ? 'image/jpeg' : 'image/png'
   const a = document.createElement('a')
   a.download = `拼豆图纸_${g.width}x${g.height}.${ext}`
   a.href = cv.toDataURL(mimeType, quality)
   a.click()
-  ElMessage.success('图纸已导出')
 }
 
 /** Render a scaled-down data-URL preview of the exported pattern. */
-function buildPreview(): string {
+function buildPreview(withGrid: boolean): string {
   const g = grid.value
   if (!g) return ''
   const pc = Math.max(4, Math.min(30, Math.round(900 / Math.max(g.width, g.height))))
-  return buildPatternCanvas(pc).toDataURL('image/png')
+  return buildPatternCanvas(pc, withGrid).toDataURL('image/png')
 }
 
-/** Open the export dialog, generating a fresh preview first. */
+/** Open the export dialog, generating both grid / no-grid previews first. */
 function openExportDialog() {
   if (!grid.value) return
-  exportPreview.value = buildPreview()
+  exportPreview.value = buildPreview(true)
+  exportPreviewPlain.value = buildPreview(false)
   showExportDialog.value = true
 }
 
-/** Export as SVG vector — mirrors the current canvas state. */
-function downloadSVG(shape: 'circle' | 'rect') {
+/** Export as SVG vector. `withGrid` = include grid lines. */
+function downloadSVG(shape: 'circle' | 'rect', withGrid: boolean) {
   const g = grid.value
   if (!g) return
   const labels = showLabels.value
   const cell = labels ? 42 : 26
-  const W = RULER + g.width * cell
-  const H = RULER + g.height * cell
+  const pad = withGrid ? RULER : 0
+  const W = pad + g.width * cell
+  const H = pad + g.height * cell
 
   let beads = ''
-
   for (let y = 0; y < g.height; y++) {
     for (let x = 0; x < g.width; x++) {
       const code = g.cells[y * g.width + x]
-      const px = RULER + x * cell, py = RULER + y * cell
+      const px = pad + x * cell, py = pad + y * cell
       if (!code) continue
       const bc = MARD_COLORS[code]
       if (!bc) continue
@@ -2379,13 +2414,15 @@ function downloadSVG(shape: 'circle' | 'rect') {
   }
 
   let gridLines = ''
-  for (let x = 0; x <= g.width; x++) {
-    const lx = RULER + x * cell
-    gridLines += `<line x1="${lx}" y1="${RULER}" x2="${lx}" y2="${H}" ${x % 10 === 0 ? 'class="tick"' : ''} />\n`
-  }
-  for (let y = 0; y <= g.height; y++) {
-    const ly = RULER + y * cell
-    gridLines += `<line x1="${RULER}" y1="${ly}" x2="${W}" y2="${ly}" ${y % 10 === 0 ? 'class="tick"' : ''} />\n`
+  if (withGrid) {
+    for (let x = 0; x <= g.width; x++) {
+      const lx = pad + x * cell
+      gridLines += `<line x1="${lx}" y1="${pad}" x2="${lx}" y2="${H}" ${x % 10 === 0 ? 'class="tick"' : ''} />\n`
+    }
+    for (let y = 0; y <= g.height; y++) {
+      const ly = pad + y * cell
+      gridLines += `<line x1="${pad}" y1="${ly}" x2="${W}" y2="${ly}" ${y % 10 === 0 ? 'class="tick"' : ''} />\n`
+    }
   }
 
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
@@ -2400,7 +2437,6 @@ ${gridLines}${beads}</svg>`
   a.href = url
   a.click()
   URL.revokeObjectURL(url)
-  ElMessage.success('SVG 已导出')
 }
 
 /** Export material list as CSV */
@@ -2420,25 +2456,27 @@ function downloadCSV() {
   a.href = url
   a.click()
   URL.revokeObjectURL(url)
-  ElMessage.success('材料单已导出')
 }
 
-// ---- export dialog handlers ----
-function handleExportPng() {
+// ---- export dialog handler — exports every chosen format in one go ----
+function handleExport(opts: {
+  formats: ('png' | 'jpg' | 'svg' | 'csv')[]
+  gridLines: boolean
+  jpgQuality: number
+  svgShape: 'circle' | 'rect'
+}) {
   showExportDialog.value = false
-  exportImage('png')
-}
-function handleExportJpg(opts: { quality: number }) {
-  showExportDialog.value = false
-  exportImage('jpeg', opts.quality / 100)
-}
-function handleExportSvg(opts: { shape: 'circle' | 'rect' }) {
-  showExportDialog.value = false
-  downloadSVG(opts.shape)
-}
-function handleExportCsv() {
-  showExportDialog.value = false
-  downloadCSV()
+  if (!grid.value || opts.formats.length === 0) return
+  // stagger the downloads so the browser doesn't drop rapid successive ones
+  opts.formats.forEach((f, i) => {
+    setTimeout(() => {
+      if (f === 'png') exportImage('png', undefined, opts.gridLines)
+      else if (f === 'jpg') exportImage('jpeg', opts.jpgQuality / 100, opts.gridLines)
+      else if (f === 'svg') downloadSVG(opts.svgShape, opts.gridLines)
+      else if (f === 'csv') downloadCSV()
+    }, i * 300)
+  })
+  ElMessage.success(`已导出 ${opts.formats.length} 个文件`)
 }
 
 // Bead shape & code labels only affect display — just repaint, no re-convert.
