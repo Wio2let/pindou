@@ -106,6 +106,11 @@
   - 图片裁剪：「转换图片」卡片「✂️ 裁剪图片」开 `BeadImageCropDialog`，PS 式
     拖手柄裁原图，应用后裁切原图并重新转换。
   - 像素图智能修正：算法选「像素图智能修正 ✦」即用 `pixelfit`（见 usePerler）。
+    用了 pixelfit 后仍可改「网格宽度」——重转换 watch 特判：pixelfit 下只改
+    宽度走 `resampleGrid`（重采样检测出的网格），改其它项才重新检测。
+  - 颜色数量上限：param-bar「颜色数」输入（0=不限），`limitColors` 保留最常
+    用 N 色、其余按平替就近合并；图片转换在 `convert` 内套用，无原图的画布
+    则由 watch 直接在当前网格上套用。
   - 全屏画布：工具栏 ⛶ 按钮 / F 键切换，`.canvas-col` 经 `<Teleport to="#app">`
     传送出去后 `position:fixed` 占满视口（必须传送——`.main>*` 的 `pop-in`
     动画 `both` 残留 transform 会困住 fixed）。导出/购买弹窗同样 `Teleport`

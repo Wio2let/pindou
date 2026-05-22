@@ -231,14 +231,12 @@
           <label class="pb-cell pb-wide">
             <span class="pb-label">网格宽度 · {{ grid.width }}×{{ grid.height }}</span>
             <input type="range" min="16" max="180" step="1"
-                   v-model.number="gridWidth" class="slider"
-                   :disabled="algo === 'pixelfit'" />
+                   v-model.number="gridWidth" class="slider" />
           </label>
           <label class="pb-cell">
             <span class="pb-label">豆数</span>
             <input type="number" min="16" max="180"
-                   v-model.number="gridWidth" class="input"
-                   :disabled="algo === 'pixelfit'" />
+                   v-model.number="gridWidth" class="input" />
           </label>
           <label class="pb-cell">
             <span class="pb-label">算法</span>
@@ -251,6 +249,11 @@
             <select class="select" v-model="matchMetric">
               <option v-for="m in MATCH_OPTIONS" :key="m.id" :value="m.id">{{ m.label }}</option>
             </select>
+          </label>
+          <label class="pb-cell">
+            <span class="pb-label">颜色数</span>
+            <input type="number" min="0" max="200" v-model.number="colorLimit"
+                   class="input" title="限制图中最多用多少种颜色；0 = 不限制" />
           </label>
           <label class="pb-cell">
             <span class="pb-label">色板</span>
@@ -601,6 +604,7 @@ const blankHeight = ref(56)                // height for "new blank canvas"
 const tier = ref<Tier>('264')
 const algo = ref<ConvertAlgo>('smooth')
 const matchMetric = ref<MatchMetric>('lab')
+const colorLimit = ref(0)       // cap on distinct colors in the result; 0 = unlimited
 const showLabels = ref(false)   // show MARD codes on every bead (canvas + export)
 const beadShape = ref<BeadShape>('circle')
 const beadSize = ref(2.6)                 // physical bead diameter, mm
@@ -844,6 +848,7 @@ function saveProject() {
     myPalette: myPaletteCodes.value,
     algo: algo.value,
     matchMetric: matchMetric.value,
+    colorLimit: colorLimit.value,
     currentCode: currentCode.value,
     gridWidth: gridWidth.value,
     blankHeight: blankHeight.value,
@@ -888,6 +893,7 @@ function openProjectFile(file: File) {
     if (proj.matchMetric && MATCH_OPTIONS.some(m => m.id === proj.matchMetric)) {
       matchMetric.value = proj.matchMetric
     }
+    if (typeof proj.colorLimit === 'number') colorLimit.value = proj.colorLimit
     if (typeof proj.blankHeight === 'number') blankHeight.value = proj.blankHeight
     gridWidth.value = pg.width
     // restore the grid
@@ -954,6 +960,29 @@ function removeRef() {
   render()
 }
 
+// Reduce the grid to at most `n` distinct colors: keep the n most-used,
+// remap every other color to its nearest kept color (by the 平替 metric).
+function limitColors(g: PerlerGrid, n: number) {
+  if (n <= 0) return
+  const counts = countColors(g)
+  if (counts.size <= n) return
+  const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1])
+  const kept = sorted.slice(0, n).map(e => e[0])
+  const keptColors = kept.map(c => MARD_COLORS[c]).filter(Boolean)
+  if (keptColors.length === 0) return
+  const keptSet = new Set(kept)
+  const remap = new Map<string, string>()
+  for (const [code] of counts) {
+    if (keptSet.has(code)) continue
+    const col = MARD_COLORS[code]
+    if (col) remap.set(code, substituteFor(col, keptColors, matchMetric.value).code)
+  }
+  for (let i = 0; i < g.cells.length; i++) {
+    const c = g.cells[i]
+    if (c) { const r = remap.get(c); if (r) g.cells[i] = r }
+  }
+}
+
 // ---- conversion ----
 async function convert(refit = true) {
   if (!sourceImg.value) return
@@ -972,6 +1001,8 @@ async function convert(refit = true) {
       sourceImg.value, gridWidth.value, workingPalette.value,
       algo.value, matchMetric.value,
     )
+    // 限制颜色数量：保留最常用的 N 色，其余就近平替
+    if (colorLimit.value > 0) limitColors(grid.value, colorLimit.value)
     gridVersion.value++
     // 「像素图智能修正」尺寸由检测决定 —— 把宽度滑块同步过去
     syncWidthFromGrid()
@@ -1045,23 +1076,43 @@ function resampleGrid(newW: number, newH: number) {
 // `suppressReconv` blocks the watch while undo/redo syncs the width slider.
 let suppressReconv = false
 let reconvTimer: number | undefined
-watch([gridWidth, algo, tier, matchMetric, palMode, myPaletteCodes], (nv, ov) => {
+watch([gridWidth, algo, tier, matchMetric, palMode, myPaletteCodes, colorLimit], (nv, ov) => {
   if (suppressReconv || !grid.value || transforming.value) return
   if (reconvTimer) clearTimeout(reconvTimer)
+  const widthChanged = nv[0] !== ov[0]
+  // anything other than the width — algorithm / palette / colour-limit …
+  const otherChanged = nv[1] !== ov[1] || nv[2] !== ov[2] || nv[3] !== ov[3]
+                    || nv[4] !== ov[4] || nv[5] !== ov[5] || nv[6] !== ov[6]
+  // resample the current grid to the new width (keeps the pattern, nearest-neighbour)
+  const doResample = () => {
+    const g = grid.value
+    if (!g) return
+    const nw = Math.max(1, Math.round(gridWidth.value))
+    if (nw === g.width) return
+    pushHistory()
+    resampleGrid(nw, Math.max(1, Math.round(nw * g.height / g.width)))
+    render()
+  }
   if (sourceImg.value) {
-    // image-based grid → re-quantize from the source
-    reconvTimer = window.setTimeout(() => convert(false), 240)
-  } else if (nv[0] !== ov[0]) {
-    // blank / hand-drawn canvas → width change resizes (resamples) the grid
+    // pixelfit auto-detects the size — a width-only tweak just resamples the
+    // detected grid; anything else re-converts from the source image
+    if (algo.value === 'pixelfit' && widthChanged && !otherChanged) {
+      reconvTimer = window.setTimeout(doResample, 240)
+    } else {
+      reconvTimer = window.setTimeout(() => convert(false), 240)
+    }
+  } else if (nv[6] !== ov[6] && colorLimit.value > 0) {
+    // no source image → colour-limit reduces the current grid in place
     reconvTimer = window.setTimeout(() => {
-      const g = grid.value
-      if (!g) return
-      const nw = Math.max(1, Math.round(gridWidth.value))
-      if (nw === g.width) return
+      if (!grid.value) return
       pushHistory()
-      resampleGrid(nw, Math.max(1, Math.round(nw * g.height / g.width)))
+      limitColors(grid.value, colorLimit.value)
+      gridVersion.value++
       render()
     }, 240)
+  } else if (widthChanged) {
+    // blank / hand-drawn canvas → width change resamples the grid
+    reconvTimer = window.setTimeout(doResample, 240)
   }
 })
 
