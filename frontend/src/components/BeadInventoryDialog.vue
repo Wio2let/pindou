@@ -32,6 +32,37 @@
                  placeholder="搜色号/名称…" />
         </div>
 
+        <!-- Tier presets — one-click add a full kit (X colours × N each) -->
+        <div class="tier-bar">
+          <span class="tier-label">套装一键加：</span>
+          <span class="tier-input-cell">
+            <span class="ti-pre">每色</span>
+            <input type="number" min="1" step="50" class="tier-input"
+                   v-model.number="tierPerColor" />
+            <span class="ti-suf">颗</span>
+          </span>
+          <div class="tier-btns">
+            <button v-for="t in TIER_ORDER" :key="t"
+                    class="tier-btn" @click="addTier(t)"
+                    :title="`给 ${TIER_LABELS[t]}（${MARD_TIERS[t].length} 色）每色加 ${tierPerColor} 颗`">
+              {{ t }} 色
+            </button>
+          </div>
+        </div>
+
+        <!-- Series filter — A/B/C/D/... chips -->
+        <div class="series-bar">
+          <span class="series-label">按系列：</span>
+          <button class="series-chip" :class="{ on: seriesFilter === '' }"
+                  @click="seriesFilter = ''">全部</button>
+          <button v-for="g in availableGroups" :key="g.key"
+                  class="series-chip" :class="{ on: seriesFilter === g.key }"
+                  :title="g.name"
+                  @click="seriesFilter = seriesFilter === g.key ? '' : g.key">
+            {{ g.key }}
+          </button>
+        </div>
+
         <!-- Quick stats -->
         <div class="stats">
           <span class="stat-chip"><b>{{ ownedCount }}</b> 色已记录</span>
@@ -74,8 +105,11 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { ElMessageBox } from 'element-plus'
-import { MARD_COLORS } from '../data/mardPalettes'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import {
+  MARD_COLORS, MARD_TIERS, TIER_ORDER, TIER_LABELS, MARD_GROUPS,
+  type Tier,
+} from '../data/mardPalettes'
 import { useInventory, BULK } from '../composables/useInventory'
 
 defineEmits<{ close: [] }>()
@@ -84,8 +118,15 @@ const { state, getCount, setCount, add, remove, clearAll, setThreshold } = useIn
 
 const searchTerm = ref('')
 const filter = ref<'all' | 'low' | 'owned'>('all')
+const seriesFilter = ref<string>('')          // '' = all series; otherwise an A/B/C/... key
+const tierPerColor = ref<number>(BULK)        // beads added per code when a tier preset is clicked
 
 const allColors = computed(() => Object.entries(MARD_COLORS).map(([code, v]) => ({ code, ...v })))
+
+// Only show series chips for keys that actually exist in MARD_COLORS.
+const availableGroups = computed(() =>
+  MARD_GROUPS.filter(g => allColors.value.some(c => c.code.startsWith(g.key)))
+)
 
 function isLow(code: string): boolean {
   const c = getCount(code)
@@ -94,13 +135,31 @@ function isLow(code: string): boolean {
 
 const filteredColors = computed(() => {
   const q = searchTerm.value.trim().toLowerCase()
+  const series = seriesFilter.value
   return allColors.value.filter(c => {
+    if (series && !c.code.startsWith(series)) return false
     if (q && !c.code.toLowerCase().includes(q) && !c.name.toLowerCase().includes(q)) return false
     if (filter.value === 'low') return isLow(c.code)
     if (filter.value === 'owned') return getCount(c.code) > 0
     return true
   })
 })
+
+/** Add a tier preset to inventory — N beads per code in that tier, in one go. */
+async function addTier(tier: Tier) {
+  const codes = MARD_TIERS[tier]
+  const per = Math.max(1, Math.floor(Number(tierPerColor.value)) || BULK)
+  try {
+    await ElMessageBox.confirm(
+      `给「${TIER_LABELS[tier]}」的 ${codes.length} 个色号每色加 ${per} 颗？\n` +
+      `总共 +${(codes.length * per).toLocaleString()} 颗`,
+      '加套装到库存',
+      { confirmButtonText: '加入', cancelButtonText: '取消', type: 'info' },
+    )
+  } catch { return /* user cancelled */ }
+  for (const code of codes) setCount(code, getCount(code) + per)
+  ElMessage.success(`已加入 ${TIER_LABELS[tier]}：${codes.length} 色 × ${per} 颗`)
+}
 
 const ownedCount = computed(() => allColors.value.filter(c => getCount(c.code) > 0).length)
 const totalBeads = computed(() =>
@@ -178,6 +237,57 @@ async function onClearAll() {
   background: #fff;
 }
 .search:focus { border-color: var(--sakura); }
+
+/* tier-preset bar — one-click add a full kit */
+.tier-bar {
+  display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap;
+  padding: 0.45rem 0.6rem; background: var(--sakura-glow);
+  border: 1.5px dashed var(--sakura-light); border-radius: var(--radius-md);
+}
+.tier-label { font-size: 0.76rem; font-weight: 700; color: var(--plum-1); }
+.tier-input-cell {
+  display: inline-flex; align-items: center; gap: 0.25rem;
+  background: #fff; border: 1.5px solid var(--cream-4);
+  border-radius: var(--radius-sm); padding: 0.05rem 0.5rem;
+  font-size: 0.74rem; color: var(--plum-2);
+}
+.ti-pre, .ti-suf { font-weight: 600; }
+.tier-input {
+  width: 58px; border: none; outline: none;
+  font-family: var(--font-mono); font-weight: 700; text-align: right;
+  background: transparent; color: var(--plum-1);
+}
+.tier-btns { display: flex; gap: 0.3rem; flex-wrap: wrap; }
+.tier-btn {
+  padding: 0.2rem 0.6rem; border: 1.5px solid var(--sakura);
+  background: #fff; color: var(--sakura-deep);
+  border-radius: var(--radius-pill);
+  font-family: var(--font-mono); font-weight: 800; font-size: 0.74rem;
+  cursor: pointer; transition: all var(--transition-fast);
+}
+.tier-btn:hover {
+  background: var(--sakura); color: #fff;
+  transform: translateY(-1px); box-shadow: 0 2px 0 var(--sakura-deep);
+}
+
+/* series filter chips */
+.series-bar {
+  display: flex; align-items: center; gap: 0.3rem; flex-wrap: wrap;
+  font-size: 0.74rem;
+}
+.series-label { font-weight: 700; color: var(--plum-2); }
+.series-chip {
+  min-width: 1.85rem; padding: 0.2rem 0.55rem;
+  border: 1.5px solid var(--cream-4); background: #fff;
+  border-radius: var(--radius-pill);
+  font-family: var(--font-mono); font-weight: 800; font-size: 0.72rem;
+  color: var(--plum-2); cursor: pointer; transition: all var(--transition-fast);
+}
+.series-chip:hover:not(.on) { border-color: var(--sakura-light); color: var(--plum-1); }
+.series-chip.on {
+  background: var(--sakura); border-color: var(--sakura-deep);
+  color: #fff; box-shadow: 0 2px 0 var(--sakura-deep);
+}
 
 .stats { display: flex; align-items: center; gap: 0.4rem; font-size: 0.74rem; flex-wrap: wrap; }
 .stat-chip {
