@@ -124,8 +124,12 @@
       <Teleport to="#app" :disabled="!fullscreen && !immersive">
       <div class="canvas-col card" :class="{ fullscreen, immersive }">
        <!-- Floating status chip — only shown in immersive highlight mode,
-            since the toolbar (where the normal status tag lives) is hidden -->
-       <div v-if="immersive" class="immersive-status">
+            since the toolbar (where the normal status tag lives) is hidden.
+            Draggable anywhere on the screen via mousedown on the chip body. -->
+       <div v-if="immersive" class="immersive-status"
+            :style="chipStyle"
+            @mousedown.stop="startChipDrag">
+         <span class="im-grip" title="拖动定位">⠿</span>
          <span class="im-mode">💡 高亮 · {{ HIGHLIGHT_LABELS[highlightMode] }}</span>
          <span v-if="highlightMode === 'row'" class="im-tag mono">
            行 {{ highlightRow + 1 }} / {{ grid.height }}
@@ -959,6 +963,50 @@ const showHighlightMenu = ref(false)
  *  grid + dim overlay fill the entire viewport. Active whenever any highlight
  *  mode is on, since the toolbar status chip is hidden too. */
 const immersive = computed(() => highlightMode.value !== 'none')
+
+// --- draggable immersive status chip ----------------------------------------
+// `chipPos` is null until the user moves the chip; while null the CSS default
+// (top-centre) applies. After the first drag the chip stays where the user
+// dropped it for the rest of the immersive session.
+const chipPos = ref<{ x: number; y: number } | null>(null)
+const chipStyle = computed(() => {
+  if (!chipPos.value) return {}
+  return {
+    left: chipPos.value.x + 'px',
+    top: chipPos.value.y + 'px',
+    transform: 'none',   // override the default `translateX(-50%)` centering
+  }
+})
+let chipDragOffset: { dx: number; dy: number } | null = null
+
+function startChipDrag(e: MouseEvent) {
+  const el = e.currentTarget as HTMLElement
+  const rect = el.getBoundingClientRect()
+  // remember pointer offset within the chip so dragging doesn't jump
+  chipDragOffset = { dx: e.clientX - rect.left, dy: e.clientY - rect.top }
+  document.addEventListener('mousemove', onChipDragMove)
+  document.addEventListener('mouseup', onChipDragEnd)
+  e.preventDefault()
+}
+function onChipDragMove(e: MouseEvent) {
+  if (!chipDragOffset) return
+  // clamp inside the viewport, leaving some padding so the chip stays grabbable
+  const w = window.innerWidth, h = window.innerHeight
+  const pad = 8
+  const x = Math.max(pad, Math.min(w - 60 - pad, e.clientX - chipDragOffset.dx))
+  const y = Math.max(pad, Math.min(h - 30 - pad, e.clientY - chipDragOffset.dy))
+  chipPos.value = { x, y }
+}
+function onChipDragEnd() {
+  chipDragOffset = null
+  document.removeEventListener('mousemove', onChipDragMove)
+  document.removeEventListener('mouseup', onChipDragEnd)
+}
+
+// Reset chip position when leaving immersive so the next entry starts centred.
+watch(immersive, (now) => {
+  if (!now) chipPos.value = null
+})
 
 const HIGHLIGHT_LABELS: Record<HighlightMode, string> = {
   none: '关闭', row: '行', col: '列', color: '色号', rect: '矩形',
@@ -3577,22 +3625,29 @@ watch(grid, () => { clearSelection(); render() })
   min-height: 0;
 }
 
-/* floating status chip in immersive mode */
+/* floating status chip in immersive mode — draggable */
 .immersive-status {
   position: fixed;
   top: 16px; left: 50%;
   transform: translateX(-50%);
   z-index: 90;
   display: flex; align-items: center; gap: 0.55rem;
-  padding: 0.45rem 0.9rem;
-  background: rgba(255, 255, 255, 0.92);
+  padding: 0.45rem 0.9rem 0.45rem 0.55rem;
+  background: rgba(255, 255, 255, 0.96);
   border: 2px solid #ffd76b;
   border-radius: 999px;
   box-shadow: 0 6px 24px rgba(255, 184, 74, 0.35);
-  pointer-events: none;
   font-family: var(--font-body);
   font-weight: 700; font-size: 0.84rem;
   color: var(--plum-1);
+  cursor: move;
+  user-select: none;
+}
+.immersive-status:active { cursor: grabbing; }
+.im-grip {
+  color: #c87b1f; font-size: 1.05rem;
+  padding: 0 0.15rem;
+  line-height: 1;
 }
 .im-mode {
   background: linear-gradient(180deg, #ffd76b, #ffb84a);
