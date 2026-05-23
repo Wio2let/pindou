@@ -524,7 +524,7 @@
   <!-- Shop Dialog -->
   <Teleport to="#app" :disabled="!fullscreen">
   <BeadShopDialog v-if="showShopDialog && grid"
-    :used-colors="usedCodes" :mard-colors="MARD_COLORS"
+    :color-counts="colorCounts" :mard-colors="MARD_COLORS"
     @close="showShopDialog = false" />
   </Teleport>
 
