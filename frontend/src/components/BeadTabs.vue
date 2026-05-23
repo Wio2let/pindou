@@ -10,7 +10,7 @@
     </router-link>
     <router-link to="/bead-studio/gallery" class="bead-tab"
                  :class="{ on: route.path === '/bead-studio/gallery' }">
-      🖼️ 我的画廊
+      🖼️ 像素画廊
     </router-link>
   </div>
 </template>

@@ -768,19 +768,19 @@ async function onPublishToGallery() {
     title = (r.value || '').trim() || `拼豆图 ${grid.value.width}×${grid.value.height}`
   } catch { return /* cancelled */ }
 
-  // Render a clean pattern — no colour-code labels, no grid lines, no ruler.
-  // Just the beads. Force showLabels off regardless of the user's UI setting,
-  // and pass withGrid=false to skip the grid/ruler overlay.
+  // Render a clean pattern — no colour-code labels, no grid lines, no ruler,
+  // and empty cells stay transparent. Force showLabels off regardless of the
+  // user's UI setting; pass withGrid=false + transparentEmpty=true.
   const prevLabels = showLabels.value
   showLabels.value = false
   let fullCv: HTMLCanvasElement
   try {
-    fullCv = buildPatternCanvas(24, false)   // 24 px/cell, beads only
+    fullCv = buildPatternCanvas(24, false, true)   // 24 px/cell, beads only, transparent bg
   } finally {
     showLabels.value = prevLabels
   }
-  // Cap the long edge at 1800 px — keeps typical patterns near-native and
-  // very wide patterns downscaled to a sensible upload size.
+  // Cap the long edge at 1800 px — typical patterns stay near-native; very
+  // wide ones downscale to keep upload size sensible.
   const maxDim = 1800
   const longEdge = Math.max(fullCv.width, fullCv.height)
   let outCv: HTMLCanvasElement
@@ -792,15 +792,15 @@ async function onPublishToGallery() {
     outCv.width = Math.max(1, Math.round(fullCv.width * scale))
     outCv.height = Math.max(1, Math.round(fullCv.height * scale))
     const tctx = outCv.getContext('2d')!
-    tctx.fillStyle = '#ffffff'
-    tctx.fillRect(0, 0, outCv.width, outCv.height)
+    // intentionally NO white fill — preserve alpha when downscaling
     tctx.imageSmoothingEnabled = true
     tctx.imageSmoothingQuality = 'high'
     tctx.drawImage(fullCv, 0, 0, outCv.width, outCv.height)
   }
-  // JPEG q=0.90 — with no fine text + no grid lines the image is mostly
-  // flat colour blocks, so even high quality stays compact (~50-120 KB).
-  const dataUrl = outCv.toDataURL('image/jpeg', 0.90)
+  // PNG keeps the alpha channel so transparent cells stay transparent;
+  // JPEG would have to flatten them onto a background. Bead patterns have
+  // few distinct colours so PNG compresses very well even at full size.
+  const dataUrl = outCv.toDataURL('image/png')
 
   // upload to the gallery (Supabase if configured, else local localStorage)
   const uploading = ElMessage({
@@ -2747,11 +2747,22 @@ function drawBead(
 
 // ---- export ----
 /**
- * Build the export-style pattern canvas at a given cell size. `withGrid`
- * controls whether grid lines + the every-10 ticks + the numbered ruler are
- * drawn — off gives a clean beads-only image. Shared by export & preview.
+ * Build the export-style pattern canvas at a given cell size.
+ *
+ * - `withGrid`: when true, paints grid lines + every-10 ticks + the numbered
+ *   ruler around the pattern. Off gives a clean beads-only image.
+ * - `transparentEmpty`: when true, leaves empty cells fully transparent and
+ *   omits the white canvas background — useful for publishing/exporting PNGs
+ *   that should let the cell background show through (e.g. against a dark
+ *   page or pasted onto another image).
+ *
+ * Shared by export & preview.
  */
-function buildPatternCanvas(cell: number, withGrid = true): HTMLCanvasElement {
+function buildPatternCanvas(
+  cell: number,
+  withGrid = true,
+  transparentEmpty = false,
+): HTMLCanvasElement {
   const g = grid.value!
   const labels = showLabels.value
   const pad = withGrid ? RULER : 0
@@ -2759,26 +2770,34 @@ function buildPatternCanvas(cell: number, withGrid = true): HTMLCanvasElement {
   cv.width = pad + g.width * cell
   cv.height = pad + g.height * cell
   const ctx = cv.getContext('2d')!
-  ctx.fillStyle = '#ffffff'
-  ctx.fillRect(0, 0, cv.width, cv.height)
+  // Only paint a white background when the caller wants opaque output —
+  // skipping this leaves the canvas fully transparent where no beads draw.
+  if (!transparentEmpty) {
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, cv.width, cv.height)
+  }
 
   const emptyMargin = cell * 0.3            // empty-cell marker inset
   const emptySize = cell - emptyMargin * 2  // empty-cell marker side
+  // bead-hole background used to "punch" the inner ring of the circle shape:
+  // white in opaque mode, but in transparent mode we want the actual hole to
+  // be empty too — so we let drawBead's evenodd ring leave it alone.
+  const beadCellBg = transparentEmpty ? 'transparent' : '#ffffff'
   for (let y = 0; y < g.height; y++) {
     for (let x = 0; x < g.width; x++) {
       const code = g.cells[y * g.width + x]
       const px = pad + x * cell, py = pad + y * cell
       if (!code) {
-        // empty cell: a small centered marker, smaller than the cell so empty
-        // cells read clearly apart from filled beads
-        if (emptySize >= 1) {
+        // empty cell: in opaque mode draw a small centered marker so it reads
+        // distinctly from a real bead; in transparent mode just skip it.
+        if (!transparentEmpty && emptySize >= 1) {
           ctx.fillStyle = ((x + y) & 1) ? '#ddd6e0' : '#bfb6c6'
           ctx.fillRect(px + emptyMargin, py + emptyMargin, emptySize, emptySize)
         }
         continue
       }
       const bc = MARD_COLORS[code]
-      drawBead(ctx, px, py, cell, bc?.hex || '#000', beadShape.value, '#ffffff')
+      drawBead(ctx, px, py, cell, bc?.hex || '#000', beadShape.value, beadCellBg)
       if (labels && bc && cell >= 12) {
         ctx.fillStyle = textOn(bc.rgb)
         ctx.font = `bold ${Math.round(cell * 0.30)}px "JetBrains Mono", monospace`
@@ -2839,7 +2858,11 @@ function buildPatternCanvas(cell: number, withGrid = true): HTMLCanvasElement {
 function exportImage(mime: 'png' | 'jpeg', quality: number | undefined, withGrid: boolean) {
   const g = grid.value
   if (!g) return
-  const cv = buildPatternCanvas(showLabels.value ? 42 : 26, withGrid)
+  // PNG supports alpha — preserve empty-cell transparency in the exported file.
+  // JPEG has no alpha so we keep the current opaque rendering (empty cells get
+  // their checker-marker on a white background).
+  const transparentEmpty = mime === 'png'
+  const cv = buildPatternCanvas(showLabels.value ? 42 : 26, withGrid, transparentEmpty)
   const ext = mime === 'jpeg' ? 'jpg' : 'png'
   const mimeType = mime === 'jpeg' ? 'image/jpeg' : 'image/png'
   const a = document.createElement('a')
@@ -2907,9 +2930,11 @@ function downloadSVG(shape: 'circle' | 'rect', withGrid: boolean) {
     }
   }
 
+  // No background rect — leave the SVG transparent so empty cells stay empty
+  // (matches the live canvas behaviour). Viewers that need an opaque
+  // backdrop can lay this over their own colour.
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
 <style>.tick{stroke:#e8462a;stroke-width:2}line{stroke:rgba(120,90,90,0.25);stroke-width:1}</style>
-<rect width="100%" height="100%" fill="#fff" />
 ${gridLines}${beads}</svg>`
 
   const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' })

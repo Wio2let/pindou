@@ -4,7 +4,7 @@
 
     <div class="header card">
       <div class="head-left">
-        <span class="title">🖼️ {{ REMOTE_ENABLED ? '共享画廊' : '我的画廊' }}</span>
+        <span class="title">🖼️ 像素画廊</span>
         <span class="sub">
           {{ REMOTE_ENABLED
             ? '所有人的作品都能在这里看到，在工坊点「🎨 发布」即可上传'

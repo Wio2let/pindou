@@ -3,20 +3,11 @@
     <aside class="rail">
       <router-link to="/bead-studio" class="brand">
         <span class="brand-mark" aria-hidden="true">
-          <svg viewBox="0 0 60 60" width="42" height="42">
-            <g fill="#ff6b9d">
-              <ellipse cx="30" cy="14" rx="7" ry="10" />
-              <ellipse cx="46" cy="22" rx="7" ry="10" transform="rotate(72 46 22)" />
-              <ellipse cx="42" cy="42" rx="7" ry="10" transform="rotate(144 42 42)" />
-              <ellipse cx="18" cy="42" rx="7" ry="10" transform="rotate(216 18 42)" />
-              <ellipse cx="14" cy="22" rx="7" ry="10" transform="rotate(288 14 22)" />
-              <circle cx="30" cy="30" r="5" fill="#ffd76b" />
-            </g>
-          </svg>
+          <img :src="brandUrl" alt="" class="brand-img" width="42" height="42" />
         </span>
         <span class="brand-text">
-          <span class="brand-zh">拼豆</span>
-          <span class="brand-en">Bead Studio</span>
+          <span class="brand-zh">像素拼豆</span>
+          <span class="brand-en">PindouVerse</span>
         </span>
       </router-link>
 
@@ -102,6 +93,9 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 
+// brand mark sits in frontend/public/brand.png — base honours vite.config.ts
+const brandUrl = `${import.meta.env.BASE_URL}brand.png`
+
 const route = useRoute()
 
 interface NavItem {
@@ -115,7 +109,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { to: '/bead-studio', zh: '拼豆工坊', en: 'Studio', icon: '◇', match: (p) => p === '/bead-studio' },
   { to: '/bead-studio/cards', zh: 'MARD 色卡', en: 'Palette', icon: '▣', match: (p) => p === '/bead-studio/cards' },
-  { to: '/bead-studio/gallery', zh: '我的画廊', en: 'Gallery', icon: '✿', match: (p) => p === '/bead-studio/gallery' },
+  { to: '/bead-studio/gallery', zh: '像素画廊', en: 'Gallery', icon: '✿', match: (p) => p === '/bead-studio/gallery' },
 ]
 
 function isActive(item: NavItem): boolean {
@@ -127,7 +121,7 @@ const pageTitle = computed(() => {
     return { zh: 'MARD 色卡', en: 'Palette Cards' }
   }
   if (route.path === '/bead-studio/gallery') {
-    return { zh: '我的画廊', en: 'Gallery' }
+    return { zh: '像素画廊', en: 'Gallery' }
   }
   return { zh: '图像拼豆', en: 'Bead Studio' }
 })
@@ -215,6 +209,14 @@ onBeforeUnmount(() => {
 .brand-mark {
   display: inline-flex;
   filter: drop-shadow(0 4px 8px rgba(255, 107, 157, 0.35));
+}
+.brand-img {
+  display: block;
+  width: 42px; height: 42px;
+  /* keep pixel-art crisp instead of blurred */
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  object-fit: contain;
 }
 
 .brand-text,
