@@ -238,6 +238,10 @@
           <button class="btn btn-ghost btn-sm" @click="openExportDialog">
             ⬇ 导出
           </button>
+          <button class="btn btn-ghost btn-sm" @click="onPublishToGallery"
+                  title="把当前画布生成带色号的图，发布到我的画廊">
+            🎨 发布
+          </button>
           <button class="btn btn-ghost btn-sm" @click="showShopDialog = true">
             🛒 购买
           </button>
@@ -608,7 +612,7 @@ export default { name: 'BeadStudio' }
 
 <script setup lang="ts">
 import { ref, computed, shallowRef, onBeforeUnmount, onActivated, onDeactivated, watch, nextTick } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   MARD_COLORS, MARD_TIERS, TIER_LABELS, TIER_ORDER, MARD_GROUPS,
   type Tier, type BeadColor,
@@ -624,6 +628,7 @@ import BeadInventoryDialog from '../components/BeadInventoryDialog.vue'
 import BeadPalettePicker from '../components/BeadPalettePicker.vue'
 import BeadImageCropDialog from '../components/BeadImageCropDialog.vue'
 import { useInventory } from '../composables/useInventory'
+import { useGallery } from '../composables/useGallery'
 
 type Tool = 'paint' | 'erase' | 'wand' | 'wanderase' | 'replace' | 'pick' | 'pan' | 'mirror'
           | 'select' | 'line' | 'rect' | 'ellipse'
@@ -685,6 +690,7 @@ const showInventoryDialog = ref(false)
 const finishConfirm = ref(false)
 let finishConfirmTimer: number | null = null
 const inventory = useInventory()
+const gallery = useGallery()
 
 /**
  * "此作品已拼完" — two-click confirm to avoid accidental inventory edits.
@@ -739,6 +745,76 @@ function onImportCanvasToInventory() {
   ElMessage.success(
     `已把画布的 ${counts.size} 个色号 · 共 ${total.toLocaleString()} 颗豆子加入库存`,
   )
+}
+
+/**
+ * "🎨 发布" — render the current canvas as a labelled-pattern PNG and store
+ * the work in the local gallery (localStorage). Prompts for a title first;
+ * the PNG always shows colour-code labels so the gallery image is usable as
+ * a printable / shareable pattern even if the live canvas had labels off.
+ */
+async function onPublishToGallery() {
+  if (!grid.value) { ElMessage.warning('画布是空的~'); return }
+  if (totalBeads.value === 0) { ElMessage.warning('画布上还没画任何豆子'); return }
+  // ask for a title
+  let title = ''
+  try {
+    const r = await ElMessageBox.prompt('给作品起个名字（也可以不写）', '发布到画廊', {
+      confirmButtonText: '发布', cancelButtonText: '取消',
+      inputPlaceholder: '比如：粉色草莓',
+      inputValue: `拼豆图 ${grid.value.width}×${grid.value.height}`,
+      inputValidator: (v: string) => v.length <= 40 || '标题最多 40 字',
+    })
+    title = (r.value || '').trim() || `拼豆图 ${grid.value.width}×${grid.value.height}`
+  } catch { return /* cancelled */ }
+
+  // generate the labelled pattern image. Temporarily force showLabels on so
+  // the saved image carries colour-codes regardless of the user's UI setting.
+  const prevLabels = showLabels.value
+  showLabels.value = true
+  let fullCv: HTMLCanvasElement
+  try {
+    // 14px/cell is enough for the label text to render crisply; for a typical
+    // 56×56 grid that yields ~800px which then downsamples cleanly.
+    fullCv = buildPatternCanvas(14, true)
+  } finally {
+    showLabels.value = prevLabels
+  }
+  // Downscale to ≤ 520px on the longer edge and encode as high-quality JPEG —
+  // PNG of a labelled pattern is ~250-400 KB and would exhaust localStorage
+  // after a few dozen works; JPEG at q=0.86 stays ~40-80 KB with little
+  // visible loss.
+  const maxDim = 520
+  const scale = Math.min(1, maxDim / Math.max(fullCv.width, fullCv.height))
+  const thumb = document.createElement('canvas')
+  thumb.width = Math.max(1, Math.round(fullCv.width * scale))
+  thumb.height = Math.max(1, Math.round(fullCv.height * scale))
+  const tctx = thumb.getContext('2d')!
+  // paint white first so the JPEG (no alpha) shows a clean background
+  tctx.fillStyle = '#ffffff'
+  tctx.fillRect(0, 0, thumb.width, thumb.height)
+  tctx.imageSmoothingEnabled = true
+  tctx.imageSmoothingQuality = 'high'
+  tctx.drawImage(fullCv, 0, 0, thumb.width, thumb.height)
+  const dataUrl = thumb.toDataURL('image/jpeg', 0.86)
+
+  const entry = gallery.publish({
+    title,
+    width: grid.value.width,
+    height: grid.value.height,
+    totalBeads: totalBeads.value,
+    uniqueColors: colorCounts.value.size,
+    beadShape: beadShape.value,
+    thumbnail: dataUrl,
+  })
+
+  ElMessage({
+    type: 'success',
+    duration: 4000,
+    showClose: true,
+    dangerouslyUseHTMLString: true,
+    message: `🎉 已发布「${entry.title}」到画廊 <a href="#/bead-studio/gallery" style="color:#e84a85;font-weight:700;margin-left:6px">去看看 →</a>`,
+  })
 }
 const showPalettePicker = ref(false)
 const exportPreview = ref('')        // export-dialog preview — with grid lines

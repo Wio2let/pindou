@@ -19,6 +19,11 @@ const router = createRouter({
       component: () => import('../views/MardCards.vue'),
     },
     {
+      path: '/bead-studio/gallery',
+      name: 'bead-gallery',
+      component: () => import('../views/Gallery.vue'),
+    },
+    {
       path: '/:pathMatch(.*)*',
       redirect: '/bead-studio',
     },

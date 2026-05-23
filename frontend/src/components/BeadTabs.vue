@@ -8,6 +8,10 @@
                  :class="{ on: route.path === '/bead-studio/cards' }">
       🎨 MARD 色卡
     </router-link>
+    <router-link to="/bead-studio/gallery" class="bead-tab"
+                 :class="{ on: route.path === '/bead-studio/gallery' }">
+      🖼️ 我的画廊
+    </router-link>
   </div>
 </template>
 
