@@ -1850,7 +1850,7 @@ function drawSelFloat(ctx: CanvasRenderingContext2D,
       const code = selBuf[dy * selBufW + dx]
       if (!code) continue
       drawBead(ctx, ox + (s.x + dx) * cell, oy + (s.y + dy) * cell, cell,
-               MARD_COLORS[code]?.hex || '#000', beadShape.value)
+               MARD_COLORS[code]?.hex || '#000', beadShape.value, '#fdf6f0')
     }
   }
 }
@@ -2419,15 +2419,7 @@ function render() {
         }
         continue
       }
-      drawBead(ctx, px, py, cell, MARD_COLORS[code]?.hex || '#000', beadShape.value)
-      // bead ring highlight (not for the edge-to-edge "fill" style)
-      if (cell > 10 && beadShape.value !== 'fill') {
-        ctx.strokeStyle = 'rgba(255,255,255,0.35)'
-        ctx.lineWidth = 1
-        ctx.beginPath()
-        ctx.arc(px + cell * 0.36, py + cell * 0.36, cell * 0.14, 0, Math.PI * 2)
-        ctx.stroke()
-      }
+      drawBead(ctx, px, py, cell, MARD_COLORS[code]?.hex || '#000', beadShape.value, '#fdf6f0')
       // color-code label
       if (showLabels.value && cell >= 13) {
         const bc = MARD_COLORS[code]
@@ -2492,7 +2484,7 @@ function render() {
   if (shapeDragging && !transforming.value) {
     const hex = curColorHex.value
     for (const [sx, sy] of currentShapeCells()) {
-      drawBead(ctx, ox + sx * cell, oy + sy * cell, cell, hex, beadShape.value)
+      drawBead(ctx, ox + sx * cell, oy + sy * cell, cell, hex, beadShape.value, '#fdf6f0')
     }
   }
 
@@ -2594,26 +2586,38 @@ function darken(hex: string, amount: number): string {
 function drawBead(
   ctx: CanvasRenderingContext2D,
   px: number, py: number, cell: number, hex: string, shape: BeadShape,
+  cellBg: string = '#ffffff',
 ) {
   ctx.fillStyle = hex
   if (shape === 'fill') {
     // edge-to-edge, tiny overlap to avoid hairline seams
     ctx.fillRect(px, py, cell + 0.6, cell + 0.6)
   } else if (shape === 'circle') {
-    // Top-down view of a real (hollow-cylinder) perler bead: outer disc in the
-    // bead colour + a smaller darker disc in the centre that reads as the hole.
+    // Top-down view of a real perler bead — a hollow ring: outer disc in the
+    // bead colour, with a smaller central disc filled with the cell's
+    // background to read as the cylinder's hole. Use evenodd fill on a single
+    // path so the two arcs share the same colour, no sub-pixel seam between
+    // the rim and the hole boundary.
     const pad = cell > 7 ? cell * 0.06 : 0
     const cx = px + cell / 2, cy = py + cell / 2
     const rOuter = (cell - pad * 2) / 2
-    ctx.beginPath()
-    ctx.arc(cx, cy, rOuter, 0, Math.PI * 2)
-    ctx.fill()
-    // inner hole — only draw when there's enough room to read; otherwise the
-    // bead degenerates to a tiny filled disc (looks fine at small zoom)
+    const rInner = rOuter * 0.42
     if (rOuter >= 3) {
-      ctx.fillStyle = darken(hex, 0.45)
+      // ring: outer arc minus inner arc, drawn as one path with evenodd rule
       ctx.beginPath()
-      ctx.arc(cx, cy, rOuter * 0.42, 0, Math.PI * 2)
+      ctx.arc(cx, cy, rOuter, 0, Math.PI * 2)
+      ctx.arc(cx, cy, rInner, 0, Math.PI * 2, true)
+      ctx.fill('evenodd')
+      // a faint inner-edge stroke so the hole reads cleanly against a similar bg
+      ctx.strokeStyle = darken(hex, 0.35)
+      ctx.lineWidth = Math.max(0.5, cell * 0.025)
+      ctx.beginPath()
+      ctx.arc(cx, cy, rInner, 0, Math.PI * 2)
+      ctx.stroke()
+    } else {
+      // too small for a visible hole — draw as a solid disc
+      ctx.beginPath()
+      ctx.arc(cx, cy, rOuter, 0, Math.PI * 2)
       ctx.fill()
     }
   } else {
@@ -2658,7 +2662,7 @@ function buildPatternCanvas(cell: number, withGrid = true): HTMLCanvasElement {
         continue
       }
       const bc = MARD_COLORS[code]
-      drawBead(ctx, px, py, cell, bc?.hex || '#000', beadShape.value)
+      drawBead(ctx, px, py, cell, bc?.hex || '#000', beadShape.value, '#ffffff')
       if (labels && bc && cell >= 12) {
         ctx.fillStyle = textOn(bc.rgb)
         ctx.font = `bold ${Math.round(cell * 0.30)}px "JetBrains Mono", monospace`
