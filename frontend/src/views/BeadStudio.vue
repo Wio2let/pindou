@@ -685,13 +685,8 @@ const zoom = ref(1)
 const offset = ref({ x: 28, y: 28 })
 const hover = ref<{ x: number; y: number } | null>(null)
 const fullscreen = ref(false)   // canvas fills the whole viewport
-const showFsTip = ref(false)    // "press F for fullscreen" tip in canvas corner
-let fsTipTimer: number | null = null
-function flashFsTip() {
-  showFsTip.value = true
-  if (fsTipTimer != null) window.clearTimeout(fsTipTimer)
-  fsTipTimer = window.setTimeout(() => { showFsTip.value = false; fsTipTimer = null }, 5000)
-}
+// "press F for fullscreen" hint — shown whenever a canvas is open and we're not already fullscreen
+const showFsTip = computed(() => !!grid.value && !fullscreen.value)
 
 // ---- cursor heart trail ----
 const HEART_COLORS = [
@@ -700,6 +695,13 @@ const HEART_COLORS = [
 ]
 let lastHeartAt = 0
 function spawnHeart(e: MouseEvent) {
+  // Skip when the cursor is hovering anywhere inside the drawing canvas — keeps
+  // the working area clean. Hearts still spawn on toolbars/palette/tip/etc.
+  const wrap = wrapRef.value
+  if (wrap) {
+    const t = e.target as Node | null
+    if (t && wrap.contains(t)) return
+  }
   const now = performance.now()
   if (now - lastHeartAt < 90) return
   lastHeartAt = now
@@ -2854,8 +2856,6 @@ onActivated(() => {
   bindGlobalEvents()
   // container size may have changed while the view was inactive
   if (grid.value) nextTick(() => syncCanvasSize())
-  // "press F for fullscreen" hint — only when a canvas is visible
-  if (grid.value && !fullscreen.value) flashFsTip()
 })
 onDeactivated(unbindGlobalEvents)
 onBeforeUnmount(unbindGlobalEvents)
@@ -2877,10 +2877,6 @@ watch(tool, (nv, ov) => {
   if (ov === 'select' && nv !== 'select') { clearSelection(); render() }
 })
 
-// Show "press F for fullscreen" tip the first moment a canvas appears
-watch(grid, (nv, ov) => {
-  if (nv && !ov && !fullscreen.value) flashFsTip()
-})
 
 // Any structural grid change (convert / undo / flip / transform …) invalidates
 // the selection, since its coordinates may no longer be in bounds.
