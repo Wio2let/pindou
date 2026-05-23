@@ -31,15 +31,31 @@
       </nav>
 
       <div class="rail-foot">
+        <!-- Auth pill: shown only when Supabase is configured -->
+        <div v-if="auth.REMOTE_ENABLED" class="auth-pill"
+             :class="{ on: !!auth.user.value }">
+          <template v-if="auth.user.value">
+            <span class="auth-email" :title="auth.user.value.email">
+              {{ shortEmail(auth.user.value.email) }}
+            </span>
+            <button class="auth-btn" @click="onSignOut" title="退出登录">↪</button>
+          </template>
+          <template v-else>
+            <button class="auth-cta" @click="showAuth = true">🌸 登录 / 注册</button>
+          </template>
+        </div>
+
         <div class="status-pill">
           <span class="status-dot"></span>
           <span>
-            <strong>本地体验</strong>
+            <strong>{{ auth.REMOTE_ENABLED ? '共享画廊' : '本地体验' }}</strong>
             <em>{{ todayLabel }}</em>
           </span>
         </div>
       </div>
     </aside>
+
+    <AuthDialog v-if="showAuth" @close="showAuth = false" />
 
     <main class="main">
       <div class="masthead">
@@ -92,11 +108,30 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
+import { ElMessage } from 'element-plus'
+import AuthDialog from './components/AuthDialog.vue'
+import { useAuth } from './composables/useAuth'
 
 // brand mark sits in frontend/public/brand.png — base honours vite.config.ts
 const brandUrl = `${import.meta.env.BASE_URL}brand.png`
 
 const route = useRoute()
+const auth = useAuth()
+const showAuth = ref(false)
+
+function shortEmail(e?: string): string {
+  if (!e) return ''
+  const at = e.indexOf('@')
+  if (at <= 1) return e
+  const name = e.slice(0, at)
+  const dom = e.slice(at)
+  if (name.length <= 10) return e
+  return name.slice(0, 8) + '…' + dom
+}
+async function onSignOut() {
+  await auth.signOut()
+  ElMessage.success('已退出登录')
+}
 
 interface NavItem {
   to: string
@@ -311,7 +346,34 @@ onBeforeUnmount(() => {
 .rail-foot {
   margin-top: auto;
   padding-top: 1rem;
+  display: flex; flex-direction: column; gap: 0.5rem;
 }
+
+.auth-pill {
+  display: flex; align-items: center; gap: 0.4rem;
+  padding: 0.4rem 0.55rem;
+  border: 1.5px solid var(--cream-4); border-radius: var(--radius-md);
+  background: #fff;
+}
+.auth-pill.on { border-color: var(--sakura-light); background: var(--sakura-glow); }
+.auth-cta {
+  flex: 1; padding: 0.3rem 0.5rem;
+  border: none; background: transparent;
+  font-family: var(--font-display); font-size: 0.82rem;
+  color: var(--sakura-deep); cursor: pointer; text-align: left;
+}
+.auth-cta:hover { color: var(--plum-1); }
+.auth-email {
+  flex: 1; font-family: var(--font-mono); font-weight: 700;
+  font-size: 0.74rem; color: var(--plum-1);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.auth-btn {
+  border: none; background: transparent; cursor: pointer;
+  color: var(--plum-3); font-size: 0.9rem;
+  padding: 0.1rem 0.35rem; border-radius: var(--radius-sm);
+}
+.auth-btn:hover { background: var(--bad-glow); color: var(--bad); }
 
 .status-pill {
   display: flex;

@@ -15,6 +15,7 @@
  */
 import { ref } from 'vue'
 import { supabase, REMOTE_ENABLED, GALLERY_TABLE, GALLERY_BUCKET } from '../lib/supabase'
+import { useAuth } from './useAuth'
 
 export const MAX_WORKS = 500
 
@@ -29,6 +30,7 @@ export interface GalleryWork {
   beadShape: 'circle' | 'square' | 'fill'
   thumbnail: string       // resolved URL (or data: URL in local mode)
   thumbPath?: string      // remote-only: storage object path, used to also delete the file
+  userId?: string | null  // remote-only: who published it (auth user id)
 }
 
 interface DBRow {
@@ -41,10 +43,10 @@ interface DBRow {
   unique_colors: number
   bead_shape: 'circle' | 'square' | 'fill'
   thumb_path: string
+  user_id: string | null
 }
 
 const LOCAL_STORAGE_KEY = 'bead-gallery-v1'
-const MY_PUBLISHES_KEY = 'bead-my-publishes-v1'   // ids of works this browser published
 
 // ---- local fallback persistence -------------------------------------------
 function loadLocal(): GalleryWork[] {
@@ -72,21 +74,6 @@ const loading = ref<boolean>(REMOTE_ENABLED)
 const error = ref<string | null>(null)
 let hydrated = !REMOTE_ENABLED
 
-// Track which work-ids were published from THIS browser so the gallery only
-// offers "取消发布" on works the user actually owns. Plain localStorage list;
-// other browsers / devices won't see it (as intended — only the publisher
-// gets the take-down handle).
-function loadMyPublishes(): Set<string> {
-  try {
-    const raw = localStorage.getItem(MY_PUBLISHES_KEY)
-    const arr = raw ? JSON.parse(raw) : []
-    return new Set(Array.isArray(arr) ? arr : [])
-  } catch { return new Set() }
-}
-function saveMyPublishes(s: Set<string>) {
-  try { localStorage.setItem(MY_PUBLISHES_KEY, JSON.stringify([...s])) } catch {}
-}
-const myPublishedIds = ref<Set<string>>(loadMyPublishes())
 
 function publicUrlFor(path: string): string {
   if (!supabase) return path
@@ -106,6 +93,7 @@ function rowToWork(r: DBRow): GalleryWork {
     beadShape: r.bead_shape,
     thumbnail: publicUrlFor(r.thumb_path),
     thumbPath: r.thumb_path,
+    userId: r.user_id,
   }
 }
 
@@ -168,15 +156,20 @@ export function useGallery() {
     thumbnailDataUrl: string
   }): Promise<GalleryWork> {
     if (REMOTE_ENABLED && supabase) {
-      // 1. upload the thumbnail blob
+      // 1. require a signed-in user — RLS will reject the insert otherwise
+      const { user } = useAuth()
+      const uid = user.value?.id
+      if (!uid) throw new Error('请先登录后再发布')
+      // 2. upload the thumbnail blob under <uid>/<slug>.png (matches the
+      //    storage RLS policy that limits writes to your own uid folder)
       const blob = dataUrlToBlob(work.thumbnailDataUrl)
       const ext = blob.type.includes('png') ? 'png' : 'jpg'
-      const path = `${randSlug()}.${ext}`
+      const path = `${uid}/${randSlug()}.${ext}`
       const { error: upErr } = await supabase.storage
         .from(GALLERY_BUCKET)
         .upload(path, blob, { contentType: blob.type, cacheControl: '31536000' })
       if (upErr) throw upErr
-      // 2. insert the metadata row
+      // 3. insert the metadata row with user_id = self
       const { data, error: insErr } = await supabase
         .from(GALLERY_TABLE)
         .insert({
@@ -187,17 +180,14 @@ export function useGallery() {
           unique_colors: work.uniqueColors,
           bead_shape: work.beadShape,
           thumb_path: path,
+          user_id: uid,
         })
         .select('*')
         .single()
       if (insErr || !data) throw insErr || new Error('insert returned no row')
       const entry = rowToWork(data as DBRow)
       state.value.unshift(entry)
-      // cap displayed list (server still keeps everything)
       while (state.value.length > MAX_WORKS) state.value.pop()
-      // remember this id locally so the gallery can show "取消发布" for it
-      myPublishedIds.value.add(entry.id)
-      saveMyPublishes(myPublishedIds.value)
       return entry
     }
     // local fallback
@@ -222,14 +212,20 @@ export function useGallery() {
   function remove(id: string) {
     const idx = state.value.findIndex(w => w.id === id)
     if (idx >= 0) state.value.splice(idx, 1)
-    myPublishedIds.value.delete(id)
     if (!REMOTE_ENABLED) saveLocal(state.value)
-    saveMyPublishes(myPublishedIds.value)
   }
 
-  /** Was this work published from THIS browser? */
+  /**
+   * Does the current signed-in user own this work?
+   * In remote mode: matches the row's user_id against the auth session.
+   * In local-only mode: every local work counts as mine.
+   */
   function isMine(id: string): boolean {
-    return myPublishedIds.value.has(id)
+    if (!REMOTE_ENABLED) return true
+    const work = state.value.find(w => w.id === id)
+    if (!work) return false
+    const { user } = useAuth()
+    return !!user.value && work.userId === user.value.id
   }
 
   /**
@@ -240,13 +236,9 @@ export function useGallery() {
    */
   async function unpublish(id: string): Promise<void> {
     if (REMOTE_ENABLED && supabase) {
-      // remove from local state first so the UI reacts immediately
       const work = state.value.find(w => w.id === id)
       const idx = state.value.findIndex(w => w.id === id)
       if (idx >= 0) state.value.splice(idx, 1)
-      myPublishedIds.value.delete(id)
-      saveMyPublishes(myPublishedIds.value)
-      // then delete server-side (row + thumbnail file)
       try {
         const { error: delErr } = await supabase
           .from(GALLERY_TABLE)
@@ -259,8 +251,6 @@ export function useGallery() {
       } catch (e: any) {
         // restore on failure so the user sees their work is still up
         if (work && idx >= 0) state.value.splice(idx, 0, work)
-        myPublishedIds.value.add(id)
-        saveMyPublishes(myPublishedIds.value)
         throw e
       }
       return
@@ -270,9 +260,7 @@ export function useGallery() {
 
   function clearAll() {
     state.value = []
-    myPublishedIds.value = new Set()
     if (!REMOTE_ENABLED) saveLocal(state.value)
-    saveMyPublishes(myPublishedIds.value)
   }
   function get(id: string): GalleryWork | undefined {
     return state.value.find(w => w.id === id)

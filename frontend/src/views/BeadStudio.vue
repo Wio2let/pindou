@@ -551,6 +551,12 @@
     @close="showInventoryDialog = false" />
   </Teleport>
 
+  <!-- Auth Dialog (login/signup) -->
+  <Teleport to="#app" :disabled="!fullscreen">
+  <AuthDialog v-if="showAuthDialog"
+    @close="showAuthDialog = false" />
+  </Teleport>
+
   <!-- Custom palette picker -->
   <BeadPalettePicker v-if="showPalettePicker"
     :codes="myPaletteCodes"
@@ -629,6 +635,8 @@ import BeadPalettePicker from '../components/BeadPalettePicker.vue'
 import BeadImageCropDialog from '../components/BeadImageCropDialog.vue'
 import { useInventory } from '../composables/useInventory'
 import { useGallery } from '../composables/useGallery'
+import { useAuth } from '../composables/useAuth'
+import AuthDialog from '../components/AuthDialog.vue'
 
 type Tool = 'paint' | 'erase' | 'wand' | 'wanderase' | 'replace' | 'pick' | 'pan' | 'mirror'
           | 'select' | 'line' | 'rect' | 'ellipse'
@@ -691,6 +699,8 @@ const finishConfirm = ref(false)
 let finishConfirmTimer: number | null = null
 const inventory = useInventory()
 const gallery = useGallery()
+const auth = useAuth()
+const showAuthDialog = ref(false)
 
 /**
  * "此作品已拼完" — two-click confirm to avoid accidental inventory edits.
@@ -756,6 +766,22 @@ function onImportCanvasToInventory() {
 async function onPublishToGallery() {
   if (!grid.value) { ElMessage.warning('画布是空的~'); return }
   if (totalBeads.value === 0) { ElMessage.warning('画布上还没画任何豆子'); return }
+  // Require sign-in for remote-mode gallery (Supabase backed)
+  if (gallery.REMOTE_ENABLED && !auth.user.value) {
+    ElMessage({
+      type: 'warning',
+      duration: 4000,
+      showClose: true,
+      dangerouslyUseHTMLString: true,
+      message: '发布到画廊需要先登录 · <a href="#" id="open-auth-now" style="color:#e84a85;font-weight:700;margin-left:6px">点这里登录/注册 →</a>',
+    })
+    // wire the link inside the toast (next tick)
+    setTimeout(() => {
+      const a = document.getElementById('open-auth-now')
+      if (a) a.onclick = (e) => { e.preventDefault(); showAuthDialog.value = true }
+    }, 50)
+    return
+  }
   // ask for a title
   let title = ''
   try {
