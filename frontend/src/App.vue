@@ -115,6 +115,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { to: '/bead-studio', zh: '拼豆工坊', en: 'Studio', icon: '◇', match: (p) => p === '/bead-studio' },
   { to: '/bead-studio/cards', zh: 'MARD 色卡', en: 'Palette', icon: '▣', match: (p) => p === '/bead-studio/cards' },
+  { to: '/bead-studio/gallery', zh: '我的画廊', en: 'Gallery', icon: '✿', match: (p) => p === '/bead-studio/gallery' },
 ]
 
 function isActive(item: NavItem): boolean {
@@ -125,12 +126,17 @@ const pageTitle = computed(() => {
   if (route.path === '/bead-studio/cards') {
     return { zh: 'MARD 色卡', en: 'Palette Cards' }
   }
+  if (route.path === '/bead-studio/gallery') {
+    return { zh: '我的画廊', en: 'Gallery' }
+  }
   return { zh: '图像拼豆', en: 'Bead Studio' }
 })
 
-const sectionLabel = computed(() =>
-  route.path === '/bead-studio/cards' ? 'Palette' : 'Studio',
-)
+const sectionLabel = computed(() => {
+  if (route.path === '/bead-studio/cards') return 'Palette'
+  if (route.path === '/bead-studio/gallery') return 'Gallery'
+  return 'Studio'
+})
 
 const todayLabel = computed(() => {
   const d = new Date()
