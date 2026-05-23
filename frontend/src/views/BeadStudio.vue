@@ -117,11 +117,31 @@
 
     <!-- ===== Workspace ===== -->
     <div v-if="grid" class="workspace">
-      <!-- Canvas column — teleported to #app in fullscreen so position:fixed
-           escapes the transformed .bead-studio containing block, while staying
-           in #app's stacking context so modal dialogs (z-index 100) stay above -->
-      <Teleport to="#app" :disabled="!fullscreen">
-      <div class="canvas-col card" :class="{ fullscreen }">
+      <!-- Canvas column — teleported to #app in fullscreen OR immersive so
+           position:fixed escapes the transformed .bead-studio containing
+           block, while staying in #app's stacking context so modal dialogs
+           (z-index 100) stay above -->
+      <Teleport to="#app" :disabled="!fullscreen && !immersive">
+      <div class="canvas-col card" :class="{ fullscreen, immersive }">
+       <!-- Floating status chip — only shown in immersive highlight mode,
+            since the toolbar (where the normal status tag lives) is hidden -->
+       <div v-if="immersive" class="immersive-status">
+         <span class="im-mode">💡 高亮 · {{ HIGHLIGHT_LABELS[highlightMode] }}</span>
+         <span v-if="highlightMode === 'row'" class="im-tag mono">
+           行 {{ highlightRow + 1 }} / {{ grid.height }}
+         </span>
+         <span v-else-if="highlightMode === 'col'" class="im-tag mono">
+           列 {{ highlightCol + 1 }} / {{ grid.width }}
+         </span>
+         <span v-else-if="highlightMode === 'color'" class="im-tag mono"
+               :style="{ background: curColorHex || '#fff' }">
+           {{ currentCode || '?' }}
+         </span>
+         <span v-else-if="highlightMode === 'rect'" class="im-tag mono">
+           {{ highlightRect.w }}×{{ highlightRect.h }} @({{ highlightRect.x + 1 }},{{ highlightRect.y + 1 }})
+         </span>
+         <span class="im-hint">Esc 退出</span>
+       </div>
        <div class="canvas-body">
         <!-- SAI-style tool rail -->
         <div class="tool-rail">
@@ -935,9 +955,10 @@ const highlightRect = ref<{ x: number; y: number; w: number; h: number }>({
   x: 0, y: 0, w: 8, h: 8,
 })
 const showHighlightMenu = ref(false)
-// remembers whether the user was in fullscreen before highlight took over,
-// so we can restore that exact state when highlight exits
-let fullscreenBeforeHighlight: boolean | null = null
+/** Pure canvas mode — chrome (toolbars, palette, ruler chrome) hidden so the
+ *  grid + dim overlay fill the entire viewport. Active whenever any highlight
+ *  mode is on, since the toolbar status chip is hidden too. */
+const immersive = computed(() => highlightMode.value !== 'none')
 
 const HIGHLIGHT_LABELS: Record<HighlightMode, string> = {
   none: '关闭', row: '行', col: '列', color: '色号', rect: '矩形',
@@ -966,11 +987,6 @@ function setHighlightMode(m: HighlightMode) {
   if (m === 'none' || highlightMode.value === m) {
     highlightMode.value = 'none'
     showHighlightMenu.value = false
-    // restore the pre-highlight fullscreen state (we entered fullscreen for them)
-    if (fullscreenBeforeHighlight !== null) {
-      fullscreen.value = fullscreenBeforeHighlight
-      fullscreenBeforeHighlight = null
-    }
     render()
     return
   }
@@ -992,11 +1008,10 @@ function setHighlightMode(m: HighlightMode) {
       clampHighlightRect()
     }
   }
-  // On first entry into ANY highlight mode, sprinkle the canvas full-screen and
-  // remember the prior state so Esc / "关闭" can put it back exactly.
+  // On first entry into ANY highlight mode, the immersive CSS class (driven
+  // by the `immersive` computed) puts canvas-col full-viewport on its own
+  // and hides every bit of chrome. Show a 3 s hint toast with the keybindings.
   if (isFreshEntry) {
-    fullscreenBeforeHighlight = fullscreen.value
-    fullscreen.value = true
     ElMessage({
       type: 'info',
       duration: 3000,
@@ -3260,11 +3275,13 @@ function onKeyDown(e: KeyboardEvent) {
         highlightCol.value = (highlightCol.value + 1) % g.width
       } else if (m === 'rect' && (e.key === 'ArrowUp' || e.key === 'ArrowDown'
                                  || e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+        // Step the rect by its own dimensions so successive presses tile
+        // across the grid (no overlap), then clamp at the edges.
         const r = highlightRect.value
-        if (e.key === 'ArrowUp')    r.y = Math.max(0, r.y - 1)
-        if (e.key === 'ArrowDown')  r.y = Math.min(g.height - r.h, r.y + 1)
-        if (e.key === 'ArrowLeft')  r.x = Math.max(0, r.x - 1)
-        if (e.key === 'ArrowRight') r.x = Math.min(g.width - r.w, r.x + 1)
+        if (e.key === 'ArrowUp')    r.y = Math.max(0, r.y - r.h)
+        if (e.key === 'ArrowDown')  r.y = Math.min(g.height - r.h, r.y + r.h)
+        if (e.key === 'ArrowLeft')  r.x = Math.max(0, r.x - r.w)
+        if (e.key === 'ArrowRight') r.x = Math.min(g.width - r.w, r.x + r.w)
       } else {
         consumed = false
       }
@@ -3346,6 +3363,13 @@ watch(tier, () => {
 // Toggling fullscreen resizes the canvas container — re-fit after the DOM updates.
 watch(fullscreen, () => {
   showColorPanel.value = false   // toolbar height changes → panel offset stale
+  nextTick(() => { syncCanvasSize(); fitView() })
+})
+
+// Same handling when toggling immersive (highlight): chrome hides/shows, so
+// the canvas-wrap available height changes — resync + refit.
+watch(immersive, () => {
+  showColorPanel.value = false
   nextTick(() => { syncCanvasSize(); fitView() })
 })
 
@@ -3525,6 +3549,70 @@ watch(grid, () => { clearSelection(); render() })
   flex: 1 1 auto;
   height: auto;
   min-height: 0;
+}
+
+/* immersive mode — when a highlight is active, hide ALL chrome (tool rail,
+   toolbar, param-bar, ref overlay, etc.) so the dim overlay + lit band fill
+   the whole viewport. The floating status chip below shows mode + index. */
+.canvas-col.immersive {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  margin: 0;
+  border-radius: 0;
+  background: #fdf6f0;
+  display: flex;
+  flex-direction: column;
+}
+.canvas-col.immersive .tool-rail,
+.canvas-col.immersive .toolbar,
+.canvas-col.immersive .param-bar,
+.canvas-col.immersive .ref-section,
+.canvas-col.immersive .color-panel { display: none; }
+.canvas-col.immersive .canvas-body { flex: 1 1 auto; min-height: 0; }
+.canvas-col.immersive .canvas-main { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.canvas-col.immersive .canvas-wrap {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+}
+
+/* floating status chip in immersive mode */
+.immersive-status {
+  position: fixed;
+  top: 16px; left: 50%;
+  transform: translateX(-50%);
+  z-index: 90;
+  display: flex; align-items: center; gap: 0.55rem;
+  padding: 0.45rem 0.9rem;
+  background: rgba(255, 255, 255, 0.92);
+  border: 2px solid #ffd76b;
+  border-radius: 999px;
+  box-shadow: 0 6px 24px rgba(255, 184, 74, 0.35);
+  pointer-events: none;
+  font-family: var(--font-body);
+  font-weight: 700; font-size: 0.84rem;
+  color: var(--plum-1);
+}
+.im-mode {
+  background: linear-gradient(180deg, #ffd76b, #ffb84a);
+  color: #6b3a06;
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+  font-weight: 800;
+}
+.im-tag {
+  padding: 0.15rem 0.55rem;
+  background: var(--cream-2);
+  border: 1.5px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  font-weight: 800;
+}
+.im-hint {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--plum-3);
+  font-weight: 700;
 }
 
 /* shape-tool fill option */
