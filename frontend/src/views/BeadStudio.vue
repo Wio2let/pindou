@@ -633,7 +633,7 @@ const algo = ref<ConvertAlgo>('smooth')
 const matchMetric = ref<MatchMetric>('lab')
 const colorLimit = ref(0)       // cap on distinct colors in the result; 0 = unlimited
 const showLabels = ref(false)   // show MARD codes on every bead (canvas + export)
-const beadShape = ref<BeadShape>('circle')
+const beadShape = ref<BeadShape>('fill')
 const beadSize = ref(2.6)                 // physical bead diameter, mm
 const brushSize = ref(1)                  // paint brush diameter in cells (Shift+wheel)
 const eraserSize = ref(1)                 // eraser diameter in cells (Shift+wheel)
@@ -2523,6 +2523,16 @@ function roundRect(
   ctx.closePath()
 }
 
+/** Mix a #RRGGBB colour toward black by amount (0..1). Used for the bead hole. */
+function darken(hex: string, amount: number): string {
+  const r = parseInt(hex.slice(1, 3), 16)
+  const g = parseInt(hex.slice(3, 5), 16)
+  const b = parseInt(hex.slice(5, 7), 16)
+  const m = 1 - amount
+  const to = (v: number) => Math.round(v * m).toString(16).padStart(2, '0')
+  return `#${to(r)}${to(g)}${to(b)}`
+}
+
 /** Draw one bead in a cell according to the chosen shape. */
 function drawBead(
   ctx: CanvasRenderingContext2D,
@@ -2533,10 +2543,22 @@ function drawBead(
     // edge-to-edge, tiny overlap to avoid hairline seams
     ctx.fillRect(px, py, cell + 0.6, cell + 0.6)
   } else if (shape === 'circle') {
+    // Top-down view of a real (hollow-cylinder) perler bead: outer disc in the
+    // bead colour + a smaller darker disc in the centre that reads as the hole.
     const pad = cell > 7 ? cell * 0.06 : 0
+    const cx = px + cell / 2, cy = py + cell / 2
+    const rOuter = (cell - pad * 2) / 2
     ctx.beginPath()
-    ctx.arc(px + cell / 2, py + cell / 2, (cell - pad * 2) / 2, 0, Math.PI * 2)
+    ctx.arc(cx, cy, rOuter, 0, Math.PI * 2)
     ctx.fill()
+    // inner hole — only draw when there's enough room to read; otherwise the
+    // bead degenerates to a tiny filled disc (looks fine at small zoom)
+    if (rOuter >= 3) {
+      ctx.fillStyle = darken(hex, 0.45)
+      ctx.beginPath()
+      ctx.arc(cx, cy, rOuter * 0.42, 0, Math.PI * 2)
+      ctx.fill()
+    }
   } else {
     // rounded square
     const pad = cell > 7 ? Math.max(0.5, cell * 0.07) : 0
