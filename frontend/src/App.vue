@@ -608,3 +608,24 @@ onBeforeUnmount(() => {
   }
 }
 </style>
+
+<!-- Global (un-scoped) — cursor-heart particles are appended to <body>, so
+     they live outside any scoped style boundary. Defining the keyframes
+     and base class here makes the effect work site-wide. -->
+<style>
+@keyframes cursor-heart-float {
+  0%   { opacity: 0;   transform: translate(0, 0) rotate(0deg) scale(0.4); }
+  18%  { opacity: 0.95; }
+  100% { opacity: 0;   transform: translate(var(--heart-dx, 0px), -70px) rotate(var(--heart-rot, 0deg)) scale(1.1); }
+}
+.cursor-heart {
+  position: fixed;
+  pointer-events: none;
+  z-index: 99999;
+  line-height: 1;
+  font-family: "Segoe UI Symbol", "Apple Color Emoji", sans-serif;
+  text-shadow: 0 1px 3px rgba(255, 107, 157, 0.45);
+  will-change: transform, opacity;
+  animation: cursor-heart-float 1.2s ease-out forwards;
+}
+</style>

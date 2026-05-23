@@ -56,6 +56,10 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import BeadTabs from '../components/BeadTabs.vue'
+import { useHeartTrail } from '../composables/useHeartTrail'
+
+// Same cursor-heart particle effect as the studio page
+useHeartTrail()
 import {
   MARD_COLORS, MARD_TIERS, MARD_GROUPS, TIER_LABELS, TIER_ORDER,
   type Tier, type BeadColor,

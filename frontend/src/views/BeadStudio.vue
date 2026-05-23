@@ -636,6 +636,7 @@ import BeadImageCropDialog from '../components/BeadImageCropDialog.vue'
 import { useInventory } from '../composables/useInventory'
 import { useGallery } from '../composables/useGallery'
 import { useAuth } from '../composables/useAuth'
+import { useHeartTrail } from '../composables/useHeartTrail'
 import AuthDialog from '../components/AuthDialog.vue'
 
 type Tool = 'paint' | 'erase' | 'wand' | 'wanderase' | 'replace' | 'pick' | 'pan' | 'mirror'
@@ -887,39 +888,8 @@ const fullscreen = ref(false)   // canvas fills the whole viewport
 // "press F for fullscreen" hint — shown whenever a canvas is open and we're not already fullscreen
 const showFsTip = computed(() => !!grid.value && !fullscreen.value)
 
-// ---- cursor heart trail ----
-const HEART_COLORS = [
-  '#ff8fb8', '#ffb3c8', '#ffd0a3', '#ffe9a3',
-  '#b8e6c1', '#a8d8ea', '#c4b5fd', '#f0a8d8',
-]
-let lastHeartAt = 0
-function spawnHeart(e: MouseEvent) {
-  // Skip when the cursor is hovering anywhere inside the drawing canvas — keeps
-  // the working area clean. Hearts still spawn on toolbars/palette/tip/etc.
-  const wrap = wrapRef.value
-  if (wrap) {
-    const t = e.target as Node | null
-    if (t && wrap.contains(t)) return
-  }
-  const now = performance.now()
-  if (now - lastHeartAt < 90) return
-  lastHeartAt = now
-  const h = document.createElement('div')
-  h.className = 'cursor-heart'
-  h.textContent = '♥'
-  const color = HEART_COLORS[(Math.random() * HEART_COLORS.length) | 0]
-  const size = 12 + Math.random() * 12      // 12–24px
-  const drift = (Math.random() - 0.5) * 60  // -30..30px horizontal
-  const rot = (Math.random() - 0.5) * 50    // -25..25deg
-  h.style.left = (e.clientX - size / 2) + 'px'
-  h.style.top = (e.clientY - size / 2) + 'px'
-  h.style.color = color
-  h.style.fontSize = size + 'px'
-  h.style.setProperty('--heart-dx', drift + 'px')
-  h.style.setProperty('--heart-rot', rot + 'deg')
-  document.body.appendChild(h)
-  window.setTimeout(() => { h.remove() }, 1200)
-}
+// cursor heart trail — shared composable; keep the canvas wrap heart-free
+useHeartTrail({ skipWhenInside: () => wrapRef.value })
 const showColorPanel = ref(false)   // floating palette — usable while fullscreen
 const colorPanelTop = ref(56)       // panel top offset (below the toolbars)
 
@@ -3092,15 +3062,11 @@ function bindGlobalEvents() {
   window.addEventListener('resize', onResize)
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('keyup', onKeyUp)
-  window.addEventListener('mousemove', spawnHeart, { passive: true })
 }
 function unbindGlobalEvents() {
   window.removeEventListener('resize', onResize)
   window.removeEventListener('keydown', onKeyDown)
   window.removeEventListener('keyup', onKeyUp)
-  window.removeEventListener('mousemove', spawnHeart)
-  // strip any stray hearts left in the DOM when leaving the view
-  document.querySelectorAll('.cursor-heart').forEach(n => n.remove())
 }
 onActivated(() => {
   bindGlobalEvents()
@@ -4007,23 +3973,4 @@ watch(grid, () => { clearSelection(); render() })
 }
 .fs-tip-enter-from { opacity: 0; transform: translateY(-6px) scale(0.92); }
 .fs-tip-leave-to   { opacity: 0; transform: translateY(-4px) scale(0.96); }
-</style>
-
-<!-- non-scoped so body-appended hearts can use these styles -->
-<style>
-@keyframes cursor-heart-float {
-  0%   { opacity: 0;   transform: translate(0, 0) rotate(0deg) scale(0.4); }
-  18%  { opacity: 0.95; }
-  100% { opacity: 0;   transform: translate(var(--heart-dx, 0px), -70px) rotate(var(--heart-rot, 0deg)) scale(1.1); }
-}
-.cursor-heart {
-  position: fixed;
-  pointer-events: none;
-  z-index: 99999;
-  line-height: 1;
-  font-family: "Segoe UI Symbol", "Apple Color Emoji", sans-serif;
-  text-shadow: 0 1px 3px rgba(255, 107, 157, 0.45);
-  will-change: transform, opacity;
-  animation: cursor-heart-float 1.2s ease-out forwards;
-}
 </style>

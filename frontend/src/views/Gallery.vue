@@ -100,6 +100,10 @@ import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import BeadTabs from '../components/BeadTabs.vue'
 import { useGallery, type GalleryWork } from '../composables/useGallery'
+import { useHeartTrail } from '../composables/useHeartTrail'
+
+// Same cursor-heart particle effect as the studio page
+useHeartTrail()
 
 const {
   state, loading, error,
