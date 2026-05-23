@@ -935,6 +935,9 @@ const highlightRect = ref<{ x: number; y: number; w: number; h: number }>({
   x: 0, y: 0, w: 8, h: 8,
 })
 const showHighlightMenu = ref(false)
+// remembers whether the user was in fullscreen before highlight took over,
+// so we can restore that exact state when highlight exits
+let fullscreenBeforeHighlight: boolean | null = null
 
 const HIGHLIGHT_LABELS: Record<HighlightMode, string> = {
   none: '关闭', row: '行', col: '列', color: '色号', rect: '矩形',
@@ -959,11 +962,19 @@ function clampHighlightRect() {
 }
 
 function setHighlightMode(m: HighlightMode) {
+  // exit path: clicking "关闭高亮" or the same mode again
   if (m === 'none' || highlightMode.value === m) {
     highlightMode.value = 'none'
+    showHighlightMenu.value = false
+    // restore the pre-highlight fullscreen state (we entered fullscreen for them)
+    if (fullscreenBeforeHighlight !== null) {
+      fullscreen.value = fullscreenBeforeHighlight
+      fullscreenBeforeHighlight = null
+    }
     render()
     return
   }
+  const isFreshEntry = highlightMode.value === 'none'
   highlightMode.value = m
   const g = grid.value
   if (g) {
@@ -981,7 +992,29 @@ function setHighlightMode(m: HighlightMode) {
       clampHighlightRect()
     }
   }
+  // On first entry into ANY highlight mode, sprinkle the canvas full-screen and
+  // remember the prior state so Esc / "关闭" can put it back exactly.
+  if (isFreshEntry) {
+    fullscreenBeforeHighlight = fullscreen.value
+    fullscreen.value = true
+    ElMessage({
+      type: 'info',
+      duration: 3000,
+      showClose: true,
+      message: `💡 高亮 · ${HIGHLIGHT_LABELS[m]}  ${highlightHintText(m)} · Esc 退出`,
+    })
+  }
   render()
+}
+
+function highlightHintText(m: HighlightMode): string {
+  switch (m) {
+    case 'row':   return '↑↓ 切换行'
+    case 'col':   return '←→ 切换列'
+    case 'color': return '在调色板换色即可换高亮色号'
+    case 'rect':  return '↑↓←→ 移动矩形 · 工具栏改宽高'
+    default:      return ''
+  }
 }
 const zoom = ref(1)
 const offset = ref({ x: 28, y: 28 })
@@ -3205,7 +3238,7 @@ function onKeyDown(e: KeyboardEvent) {
     if (showHighlightMenu.value) { e.preventDefault(); showHighlightMenu.value = false; return }
     if (showColorPanel.value) { e.preventDefault(); showColorPanel.value = false; return }
     if (highlightMode.value !== 'none') {
-      e.preventDefault(); highlightMode.value = 'none'; render(); return
+      e.preventDefault(); setHighlightMode('none'); return
     }
     if (selection.value) { e.preventDefault(); clearSelection(); render(); return }
     if (fullscreen.value) { e.preventDefault(); fullscreen.value = false; return }
