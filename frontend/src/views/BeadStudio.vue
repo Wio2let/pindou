@@ -171,17 +171,19 @@
            </button>
            <div v-if="showColorPickerInChip" class="im-color-grid"
                 @click.stop @mousedown.stop>
-             <button v-for="c in workingPalette" :key="c.code"
+             <button v-for="c in usedColorsForPicker" :key="c.code"
                      class="im-color-cell"
                      :class="{ on: currentCode === c.code }"
                      :style="{ background: c.hex }"
-                     :title="`${c.code} ${c.name}`"
+                     :title="`${c.code} ${c.name} · 画布上 ${c.count} 颗`"
                      @click="selectColor(c.code); showColorPickerInChip = false">
                <span class="mono im-color-code"
                      :style="{ color: chipTextOn(c.hex) }">{{ c.code }}</span>
+               <span class="mono im-color-count"
+                     :style="{ color: chipTextOn(c.hex) }">{{ c.count }}</span>
              </button>
-             <div v-if="workingPalette.length === 0" class="im-color-empty">
-               色板是空的，先回到工坊设置一下
+             <div v-if="usedColorsForPicker.length === 0" class="im-color-empty">
+               画布上还没有任何颜色
              </div>
            </div>
          </span>
@@ -1021,6 +1023,17 @@ const immersive = computed(() => highlightMode.value !== 'none')
 const showColorPickerInChip = ref(false)
 // close the picker when leaving immersive / colour mode
 watch([immersive, highlightMode], () => { showColorPickerInChip.value = false })
+
+/** Colours currently used on the canvas — what the chip's picker offers, so
+ *  the user is only choosing among codes that actually appear in their work
+ *  (and the highlight will always have at least one matching bead).
+ *  Sorted by usage so the most common code comes first. */
+const usedColorsForPicker = computed(() => {
+  const counts = colorCounts.value
+  return [...counts.entries()]
+    .map(([code, n]) => ({ code, count: n, hex: MARD_COLORS[code]?.hex || '#000', name: MARD_COLORS[code]?.name || '' }))
+    .sort((a, b) => b.count - a.count)
+})
 
 /** Pick a readable foreground colour for text drawn on the given bead hex. */
 function chipTextOn(hex: string): string {
@@ -3813,7 +3826,12 @@ watch(grid, () => { clearSelection(); render() })
   border-width: 3px; border-color: #c87b1f;
   box-shadow: 0 0 0 2px #ffd76b, 0 2px 6px rgba(255, 184, 74, 0.6);
 }
-.im-color-code { font-size: 0.56rem; font-weight: 800; line-height: 1; }
+.im-color-cell {
+  flex-direction: column;
+  gap: 1px;
+}
+.im-color-code { font-size: 0.6rem; font-weight: 800; line-height: 1; }
+.im-color-count { font-size: 0.48rem; font-weight: 700; line-height: 1; opacity: 0.85; }
 .im-color-empty {
   grid-column: 1 / -1;
   text-align: center; padding: 1rem 0.5rem;
