@@ -768,24 +768,20 @@ async function onPublishToGallery() {
     title = (r.value || '').trim() || `拼豆图 ${grid.value.width}×${grid.value.height}`
   } catch { return /* cancelled */ }
 
-  // Generate the labelled pattern image. Temporarily force showLabels on so
-  // the saved image always carries colour-codes regardless of the user's UI
-  // setting. Cell size needs to be ≥ ~24 px so the label text (≈ 30 % of cell)
-  // is large enough to read after JPEG encoding.
+  // Render a clean pattern — no colour-code labels, no grid lines, no ruler.
+  // Just the beads. Force showLabels off regardless of the user's UI setting,
+  // and pass withGrid=false to skip the grid/ruler overlay.
   const prevLabels = showLabels.value
-  showLabels.value = true
+  showLabels.value = false
   let fullCv: HTMLCanvasElement
   try {
-    // Use a generous source cell size so labels stay legible: 36 px/cell →
-    // label text ≈ 11 px, survives JPEG without smudging into the bead colour.
-    fullCv = buildPatternCanvas(36, true)
+    fullCv = buildPatternCanvas(24, false)   // 24 px/cell, beads only
   } finally {
     showLabels.value = prevLabels
   }
-  // Cap the long edge at 2000 px — wide patterns (>56 cells) need some
-  // downscale to stay under a sensible upload size, but typical 56×56 grids
-  // come in at ~2040 px and only barely downscale, preserving label crispness.
-  const maxDim = 2000
+  // Cap the long edge at 1800 px — keeps typical patterns near-native and
+  // very wide patterns downscaled to a sensible upload size.
+  const maxDim = 1800
   const longEdge = Math.max(fullCv.width, fullCv.height)
   let outCv: HTMLCanvasElement
   if (longEdge <= maxDim) {
@@ -802,7 +798,9 @@ async function onPublishToGallery() {
     tctx.imageSmoothingQuality = 'high'
     tctx.drawImage(fullCv, 0, 0, outCv.width, outCv.height)
   }
-  const dataUrl = outCv.toDataURL('image/jpeg', 0.82)
+  // JPEG q=0.90 — with no fine text + no grid lines the image is mostly
+  // flat colour blocks, so even high quality stays compact (~50-120 KB).
+  const dataUrl = outCv.toDataURL('image/jpeg', 0.90)
 
   // upload to the gallery (Supabase if configured, else local localStorage)
   const uploading = ElMessage({
