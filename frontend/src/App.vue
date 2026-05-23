@@ -45,11 +45,11 @@
           </template>
         </div>
 
-        <div class="status-pill">
-          <span class="status-dot"></span>
-          <span>
-            <strong>{{ auth.REMOTE_ENABLED ? '共享画廊' : '本地体验' }}</strong>
-            <em>{{ todayLabel }}</em>
+        <div class="weather-pill" :title="weather.tooltip">
+          <span class="weather-icon">{{ weather.icon }}</span>
+          <span class="weather-text">
+            <strong>{{ weather.headline }}</strong>
+            <em>{{ weather.detail }}</em>
           </span>
         </div>
       </div>
@@ -183,6 +183,89 @@ const todayLong = computed(() => {
   return `周${wd} · ${todayLabel.value}`
 })
 
+// --- local weather widget (sidebar bottom) ---------------------------------
+// Uses ipapi.co to guess the user's city + lat/lon, then Open-Meteo for the
+// current conditions. Both endpoints are key-less and CORS-friendly. Falls
+// back to a neutral "❀ pixel weather" display if anything blows up so the
+// pill still looks intentional.
+const weather = ref<{ icon: string; headline: string; detail: string; tooltip: string }>({
+  icon: '🌸',
+  headline: '获取天气中…',
+  detail: todayLong.value,
+  tooltip: '正在拉取你所在地的天气',
+})
+
+// WMO weather-code → (emoji, Chinese description). Open-Meteo uses these.
+const WEATHER_TABLE: Record<number, { icon: string; desc: string }> = {
+  0: { icon: '☀️', desc: '晴' },
+  1: { icon: '🌤️', desc: '晴间多云' },
+  2: { icon: '⛅', desc: '局部多云' },
+  3: { icon: '☁️', desc: '阴' },
+  45: { icon: '🌫️', desc: '雾' },
+  48: { icon: '🌫️', desc: '霜雾' },
+  51: { icon: '🌦️', desc: '小毛毛雨' },
+  53: { icon: '🌦️', desc: '毛毛雨' },
+  55: { icon: '🌦️', desc: '密集毛毛雨' },
+  56: { icon: '🌨️', desc: '冻毛毛雨' },
+  57: { icon: '🌨️', desc: '冻毛毛雨' },
+  61: { icon: '🌧️', desc: '小雨' },
+  63: { icon: '🌧️', desc: '中雨' },
+  65: { icon: '🌧️', desc: '大雨' },
+  66: { icon: '🌨️', desc: '冻雨' },
+  67: { icon: '🌨️', desc: '冻雨' },
+  71: { icon: '🌨️', desc: '小雪' },
+  73: { icon: '🌨️', desc: '中雪' },
+  75: { icon: '❄️', desc: '大雪' },
+  77: { icon: '❄️', desc: '雪粒' },
+  80: { icon: '🌦️', desc: '阵雨' },
+  81: { icon: '🌧️', desc: '阵雨' },
+  82: { icon: '⛈️', desc: '强阵雨' },
+  85: { icon: '🌨️', desc: '阵雪' },
+  86: { icon: '❄️', desc: '强阵雪' },
+  95: { icon: '⛈️', desc: '雷暴' },
+  96: { icon: '⛈️', desc: '雷暴伴冰雹' },
+  99: { icon: '⛈️', desc: '强雷暴伴冰雹' },
+}
+
+let weatherRefreshTimer: number | null = null
+
+async function loadWeather() {
+  try {
+    // 1. IP-based geolocation
+    const locRes = await fetch('https://ipapi.co/json/')
+    if (!locRes.ok) throw new Error('ip lookup failed')
+    const loc = await locRes.json()
+    const lat = Number(loc.latitude), lon = Number(loc.longitude)
+    const city = loc.city || loc.region || loc.country_name || ''
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) throw new Error('no coords')
+    // 2. weather via Open-Meteo
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
+      `&current=temperature_2m,weather_code,relative_humidity_2m,wind_speed_10m`
+    const wRes = await fetch(url)
+    if (!wRes.ok) throw new Error('weather fetch failed')
+    const w = await wRes.json()
+    const c = w.current || {}
+    const code = c.weather_code as number
+    const temp = Math.round(c.temperature_2m as number)
+    const meta = WEATHER_TABLE[code] || { icon: '🌥️', desc: '天气未知' }
+    weather.value = {
+      icon: meta.icon,
+      headline: `${city || '当地'} ${temp}°`,
+      detail: `${meta.desc} · ${todayLong.value}`,
+      tooltip: `${city || '本地'}  ${temp}°C · ${meta.desc}` +
+               (c.relative_humidity_2m != null ? ` · 湿度 ${c.relative_humidity_2m}%` : '') +
+               (c.wind_speed_10m != null ? ` · 风速 ${c.wind_speed_10m} km/h` : ''),
+    }
+  } catch {
+    weather.value = {
+      icon: '🌸',
+      headline: '像素天气',
+      detail: todayLong.value,
+      tooltip: '天气暂时拉不到，过会儿再试',
+    }
+  }
+}
+
 const scrollY = ref(0)
 const docHeight = ref(0)
 const winHeight = ref(0)
@@ -208,10 +291,14 @@ onMounted(() => {
   onScroll()
   window.addEventListener('scroll', onScroll, { passive: true })
   window.addEventListener('resize', onScroll)
+  loadWeather()
+  // refresh every 30 min so the temperature stays current
+  weatherRefreshTimer = window.setInterval(loadWeather, 30 * 60 * 1000)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('scroll', onScroll)
+  if (weatherRefreshTimer != null) clearInterval(weatherRefreshTimer)
   window.removeEventListener('resize', onScroll)
 })
 </script>
@@ -260,8 +347,7 @@ onBeforeUnmount(() => {
 }
 
 .brand-text,
-.rail-name,
-.status-pill span {
+.rail-name {
   display: flex;
   flex-direction: column;
 }
@@ -381,37 +467,44 @@ onBeforeUnmount(() => {
 }
 .auth-btn:hover { background: var(--bad-glow); color: var(--bad); }
 
-.status-pill {
+.weather-pill {
   display: flex;
   gap: 0.65rem;
   align-items: center;
   padding: 0.7rem 0.85rem;
-  background: #fff;
+  background: linear-gradient(135deg, #ffffff, #fff5f0);
   border: 2px solid var(--sakura-light);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-soft);
+  cursor: default;
 }
 
-.status-dot {
-  width: 0.7rem;
-  height: 0.7rem;
-  background: var(--ok);
-  border-radius: 999px;
-  box-shadow: 0 0 8px var(--ok);
+.weather-icon {
+  font-size: 1.6rem;
+  line-height: 1;
+  filter: drop-shadow(0 2px 4px rgba(255, 107, 157, 0.25));
 }
 
-.status-pill strong {
+.weather-text { display: flex; flex-direction: column; min-width: 0; }
+
+.weather-text strong {
   font-family: var(--font-display);
   font-size: 0.92rem;
   color: var(--sakura-deep);
   font-style: normal;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.status-pill em {
+.weather-text em {
   margin-top: 0.1rem;
   font-size: 0.7rem;
   color: var(--plum-3);
   font-style: normal;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .main {
