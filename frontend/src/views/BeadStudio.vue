@@ -208,6 +208,31 @@
             📐 画布尺寸
           </button>
           <div class="tool-divider"></div>
+          <!-- highlight mode group -->
+          <div class="hi-group">
+            <button class="hi-btn" :class="{ on: highlightMode === 'row' }"
+                    @click="setHighlightMode('row')"
+                    title="高亮某一行（↑↓ 切换；Esc 关闭）">💡 行</button>
+            <button class="hi-btn" :class="{ on: highlightMode === 'col' }"
+                    @click="setHighlightMode('col')"
+                    title="高亮某一列（←→ 切换；Esc 关闭）">💡 列</button>
+            <button class="hi-btn" :class="{ on: highlightMode === 'color' }"
+                    @click="setHighlightMode('color')"
+                    :title="`高亮所有「当前色 ${currentCode || '?'}」豆子（在调色板换色即可换高亮色号）`">
+              💡 色号
+            </button>
+            <span v-if="highlightMode === 'row'" class="hi-tag mono">
+              行 {{ highlightRow + 1 }} / {{ grid.height }}
+            </span>
+            <span v-else-if="highlightMode === 'col'" class="hi-tag mono">
+              列 {{ highlightCol + 1 }} / {{ grid.width }}
+            </span>
+            <span v-else-if="highlightMode === 'color'" class="hi-tag mono"
+                  :style="{ background: curColorHex || '#fff' }">
+              {{ currentCode || '请先选色' }}
+            </span>
+          </div>
+          <div class="tool-divider"></div>
           <div class="tool-group">
             <button class="tool-btn" title="缩小 (-)" @click="zoomBy(-1)">－</button>
             <span class="zoom-label mono">{{ Math.round(zoom * 100) }}%</span>
@@ -222,7 +247,7 @@
           <span class="grid-size mono" title="按豆径换算的成品尺寸">
             ≈ {{ finishedSize }}
           </span>
-          <span class="kbd-hint" title="B 画笔 · E 橡皮 · G 魔棒画笔 · D 魔棒橡皮 · R 替换 · M 镜像复制 · S 选区 · I 取色 · H/空格 移动 · F 全屏 · ⇧+滚轮 笔刷大小 · +/- 缩放 · 0 适应 · Ctrl+Z 撤销">⌨ 快捷键</span>
+          <span class="kbd-hint" title="B 画笔 · E 橡皮 · G 魔棒画笔 · D 魔棒橡皮 · R 替换 · M 镜像复制 · S 选区 · I 取色 · H/空格 移动 · F 全屏 · ⇧+滚轮 笔刷大小 · +/- 缩放 · 0 适应 · Ctrl+Z 撤销 · 高亮模式下 ↑↓←→ 切换行列、Esc 退出">⌨ 快捷键</span>
           <label class="export-opt" style="margin-left:auto;" title="在画布每颗豆上显示 MARD 色号">
             <input type="checkbox" v-model="showLabels" />
             <span>标色号</span>
@@ -881,6 +906,30 @@ const matchDesc = computed(() =>
 
 const tool = ref<Tool>('paint')
 const currentCode = ref('')
+
+// ---- highlight mode -------------------------------------------------------
+// "row" / "col" highlight a single row or column (arrow keys to navigate);
+// "color" dims every cell whose colour code isn't the current paint colour.
+type HighlightMode = 'none' | 'row' | 'col' | 'color'
+const highlightMode = ref<HighlightMode>('none')
+const highlightRow = ref(0)
+const highlightCol = ref(0)
+
+function setHighlightMode(m: Exclude<HighlightMode, 'none'>) {
+  if (highlightMode.value === m) {
+    highlightMode.value = 'none'
+  } else {
+    highlightMode.value = m
+    // pick a sensible starting index when entering row/col mode
+    if (m === 'row' && grid.value) {
+      highlightRow.value = Math.min(highlightRow.value, grid.value.height - 1)
+    }
+    if (m === 'col' && grid.value) {
+      highlightCol.value = Math.min(highlightCol.value, grid.value.width - 1)
+    }
+  }
+  render()
+}
 const zoom = ref(1)
 const offset = ref({ x: 28, y: 28 })
 const hover = ref<{ x: number; y: number } | null>(null)
@@ -2643,6 +2692,12 @@ function render() {
     }
   }
 
+  // highlight overlay: dim every cell that's NOT in the highlighted row /
+  // column / colour, then draw a bright outline on the focused band.
+  if (highlightMode.value !== 'none' && !transforming.value) {
+    drawHighlightOverlay(ctx, cell, ox, oy)
+  }
+
   // ruler
   ctx.fillStyle = '#fff'
   ctx.fillRect(0, 0, W, RULER)
@@ -2668,6 +2723,65 @@ function render() {
 
   // free-transform box + handles (drawn on top of the ruler)
   if (transforming.value) drawTransformBox(ctx, cell, ox, oy)
+}
+
+/**
+ * Dim every cell not in the highlighted row / column / colour band by
+ * painting a translucent black rectangle over it, then draw a bright outline
+ * around the lit area so the focus is unmistakable.
+ */
+function drawHighlightOverlay(
+  ctx: CanvasRenderingContext2D, cell: number, ox: number, oy: number,
+) {
+  const g = grid.value!
+  const W = g.width * cell, H = g.height * cell
+  const dim = 'rgba(20, 14, 30, 0.55)'
+
+  ctx.save()
+  ctx.fillStyle = dim
+  if (highlightMode.value === 'row') {
+    const r = Math.max(0, Math.min(g.height - 1, highlightRow.value))
+    // dim above and below the highlighted row
+    if (r > 0) ctx.fillRect(ox, oy, W, r * cell)
+    if (r < g.height - 1) ctx.fillRect(ox, oy + (r + 1) * cell, W, (g.height - r - 1) * cell)
+    // bright outline on the row
+    ctx.strokeStyle = '#ffd76b'
+    ctx.lineWidth = 2
+    ctx.strokeRect(ox + 0.5, oy + r * cell + 0.5, W - 1, cell - 1)
+  } else if (highlightMode.value === 'col') {
+    const c = Math.max(0, Math.min(g.width - 1, highlightCol.value))
+    if (c > 0) ctx.fillRect(ox, oy, c * cell, H)
+    if (c < g.width - 1) ctx.fillRect(ox + (c + 1) * cell, oy, (g.width - c - 1) * cell, H)
+    ctx.strokeStyle = '#ffd76b'
+    ctx.lineWidth = 2
+    ctx.strokeRect(ox + c * cell + 0.5, oy + 0.5, cell - 1, H - 1)
+  } else if (highlightMode.value === 'color') {
+    const target = currentCode.value
+    if (!target) {
+      // no colour picked — dim everything as a hint
+      ctx.fillRect(ox, oy, W, H)
+    } else {
+      // dim all non-matching cells; leave matching cells bright
+      for (let y = 0; y < g.height; y++) {
+        for (let x = 0; x < g.width; x++) {
+          if (g.cells[y * g.width + x] !== target) {
+            ctx.fillRect(ox + x * cell, oy + y * cell, cell, cell)
+          }
+        }
+      }
+      // draw a bright outline around each matching cell
+      ctx.strokeStyle = '#ffd76b'
+      ctx.lineWidth = Math.max(1.5, cell * 0.06)
+      for (let y = 0; y < g.height; y++) {
+        for (let x = 0; x < g.width; x++) {
+          if (g.cells[y * g.width + x] === target) {
+            ctx.strokeRect(ox + x * cell + 1, oy + y * cell + 1, cell - 2, cell - 2)
+          }
+        }
+      }
+    }
+  }
+  ctx.restore()
 }
 
 function roundRect(
@@ -2984,6 +3098,9 @@ function handleExport(opts: {
 
 // Bead shape & code labels only affect display — just repaint, no re-convert.
 watch([beadShape, showLabels], () => render())
+// re-render when the highlight target changes (mode toggle, row/col index, or
+// the current paint colour while in colour-highlight mode)
+watch([highlightMode, highlightRow, highlightCol, currentCode], () => render())
 
 // ---- keyboard shortcuts ----
 let panBeforeSpace: Tool | null = null
@@ -3007,8 +3124,31 @@ function onKeyDown(e: KeyboardEvent) {
   }
   if (e.key === 'Escape') {
     if (showColorPanel.value) { e.preventDefault(); showColorPanel.value = false; return }
+    if (highlightMode.value !== 'none') {
+      e.preventDefault(); highlightMode.value = 'none'; render(); return
+    }
     if (selection.value) { e.preventDefault(); clearSelection(); render(); return }
     if (fullscreen.value) { e.preventDefault(); fullscreen.value = false; return }
+  }
+
+  // arrow keys cycle the highlighted row/col while in that mode
+  if (highlightMode.value === 'row' || highlightMode.value === 'col') {
+    const g = grid.value
+    if (g) {
+      let consumed = true
+      if (highlightMode.value === 'row' && e.key === 'ArrowUp') {
+        highlightRow.value = (highlightRow.value - 1 + g.height) % g.height
+      } else if (highlightMode.value === 'row' && e.key === 'ArrowDown') {
+        highlightRow.value = (highlightRow.value + 1) % g.height
+      } else if (highlightMode.value === 'col' && e.key === 'ArrowLeft') {
+        highlightCol.value = (highlightCol.value - 1 + g.width) % g.width
+      } else if (highlightMode.value === 'col' && e.key === 'ArrowRight') {
+        highlightCol.value = (highlightCol.value + 1) % g.width
+      } else {
+        consumed = false
+      }
+      if (consumed) { e.preventDefault(); render(); return }
+    }
   }
 
   // undo / redo
@@ -3374,6 +3514,33 @@ watch(grid, () => { clearSelection(); render() })
   white-space: nowrap;
 }
 .tool-divider { width: 1px; height: 22px; background: var(--line-strong); }
+
+/* highlight-mode group — three toggle pills + a live status tag */
+.hi-group { display: flex; align-items: center; gap: 0.25rem; flex-wrap: nowrap; }
+.hi-btn {
+  padding: 0.3rem 0.6rem;
+  border: 1.5px solid var(--cream-4);
+  background: #fff; color: var(--plum-2);
+  border-radius: var(--radius-pill);
+  font-size: 0.74rem; font-weight: 700;
+  cursor: pointer; transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+.hi-btn:hover { border-color: var(--sakura-light); color: var(--plum-1); }
+.hi-btn.on {
+  background: linear-gradient(180deg, #ffd76b, #ffb84a);
+  border-color: #c87b1f;
+  color: #6b3a06;
+  box-shadow: 0 2px 0 #c87b1f;
+}
+.hi-tag {
+  padding: 0.15rem 0.55rem;
+  font-size: 0.72rem; font-weight: 800;
+  background: var(--cream-2);
+  border: 1.5px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  color: var(--plum-1);
+}
 .export-opt {
   display: inline-flex;
   align-items: center;
