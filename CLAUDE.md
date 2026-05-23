@@ -74,7 +74,7 @@
   - 初始界面：`setup-card` 为「转换图片 / 新建画布 / 导入工程」三等分卡片
     （`.entry-grid` 三列、每张卡片含视觉区 + 标题 + 描述）；转换参数（算法/
     平替/色板）收在可折叠的 `.conv-section`（`showConvSettings`，默认收起）。
-  - 转换：8 生成算法 + 4 平替算法（默认 `lab` 丝滑匹配）。拖入/选择图片
+  - 转换：9 生成算法 + 4 平替算法（默认 `lab` 丝滑匹配）。拖入/选择图片
     （上传区或画布上拖放皆可）会**自动转换**；改宽度/算法/色板从原图重新
     量化生成（防抖）；自动重生成前会 `pushHistory`，故 **可 Ctrl+Z 撤销回
     上一次设置**（撤销会同步宽度滑块，`suppressReconv` 防其再触发转换）。
@@ -159,4 +159,7 @@ python -c "import py_compile; ..."     # 后端语法
 为 GitHub Actions：push 到 `bead-studio-only` 即 `npm ci` + `npx vite build`
 （构建用 vite、绕开有历史报错的 `vue-tsc`）并部署 `frontend/dist` 到 Pages。
 站点：<https://wio2let.github.io/pindou/>。仓库设置里 Pages 的 Source 需选
-「GitHub Actions」（一次性手动步骤）。
+「GitHub Actions」（一次性手动步骤）。另一坑：若 deploy 报
+「Branch bead-studio-only is not allowed to deploy to github-pages due to
+environment protection rules」，去 Settings → Environments → github-pages
+的「Deployment branches」放行 `bead-studio-only` 分支（一次性）。

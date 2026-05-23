@@ -346,6 +346,12 @@
           <div v-if="hoverTip && !transforming" class="hover-tip" :style="hoverTipStyle">
             {{ hoverTip }}
           </div>
+          <transition name="fs-tip">
+            <div v-if="showFsTip" class="fs-tip">
+              <span class="fs-tip-key">F</span>
+              <span class="fs-tip-text">键可全屏画布</span>
+            </div>
+          </transition>
           <!-- free-transform action bar -->
           <div v-if="transforming" class="xform-bar">
             <span class="xform-title">自由变换</span>
@@ -679,6 +685,40 @@ const zoom = ref(1)
 const offset = ref({ x: 28, y: 28 })
 const hover = ref<{ x: number; y: number } | null>(null)
 const fullscreen = ref(false)   // canvas fills the whole viewport
+const showFsTip = ref(false)    // "press F for fullscreen" tip in canvas corner
+let fsTipTimer: number | null = null
+function flashFsTip() {
+  showFsTip.value = true
+  if (fsTipTimer != null) window.clearTimeout(fsTipTimer)
+  fsTipTimer = window.setTimeout(() => { showFsTip.value = false; fsTipTimer = null }, 5000)
+}
+
+// ---- cursor heart trail ----
+const HEART_COLORS = [
+  '#ff8fb8', '#ffb3c8', '#ffd0a3', '#ffe9a3',
+  '#b8e6c1', '#a8d8ea', '#c4b5fd', '#f0a8d8',
+]
+let lastHeartAt = 0
+function spawnHeart(e: MouseEvent) {
+  const now = performance.now()
+  if (now - lastHeartAt < 90) return
+  lastHeartAt = now
+  const h = document.createElement('div')
+  h.className = 'cursor-heart'
+  h.textContent = '♥'
+  const color = HEART_COLORS[(Math.random() * HEART_COLORS.length) | 0]
+  const size = 12 + Math.random() * 12      // 12–24px
+  const drift = (Math.random() - 0.5) * 60  // -30..30px horizontal
+  const rot = (Math.random() - 0.5) * 50    // -25..25deg
+  h.style.left = (e.clientX - size / 2) + 'px'
+  h.style.top = (e.clientY - size / 2) + 'px'
+  h.style.color = color
+  h.style.fontSize = size + 'px'
+  h.style.setProperty('--heart-dx', drift + 'px')
+  h.style.setProperty('--heart-rot', rot + 'deg')
+  document.body.appendChild(h)
+  window.setTimeout(() => { h.remove() }, 1200)
+}
 const showColorPanel = ref(false)   // floating palette — usable while fullscreen
 const colorPanelTop = ref(56)       // panel top offset (below the toolbars)
 
@@ -2800,16 +2840,22 @@ function bindGlobalEvents() {
   window.addEventListener('resize', onResize)
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('keyup', onKeyUp)
+  window.addEventListener('mousemove', spawnHeart, { passive: true })
 }
 function unbindGlobalEvents() {
   window.removeEventListener('resize', onResize)
   window.removeEventListener('keydown', onKeyDown)
   window.removeEventListener('keyup', onKeyUp)
+  window.removeEventListener('mousemove', spawnHeart)
+  // strip any stray hearts left in the DOM when leaving the view
+  document.querySelectorAll('.cursor-heart').forEach(n => n.remove())
 }
 onActivated(() => {
   bindGlobalEvents()
   // container size may have changed while the view was inactive
   if (grid.value) nextTick(() => syncCanvasSize())
+  // "press F for fullscreen" hint — only when a canvas is visible
+  if (grid.value && !fullscreen.value) flashFsTip()
 })
 onDeactivated(unbindGlobalEvents)
 onBeforeUnmount(unbindGlobalEvents)
@@ -2829,6 +2875,11 @@ watch(fullscreen, () => {
 // Leaving the selection tool drops any active selection.
 watch(tool, (nv, ov) => {
   if (ov === 'select' && nv !== 'select') { clearSelection(); render() }
+})
+
+// Show "press F for fullscreen" tip the first moment a canvas appears
+watch(grid, (nv, ov) => {
+  if (nv && !ov && !fullscreen.value) flashFsTip()
 })
 
 // Any structural grid change (convert / undo / flip / transform …) invalidates
@@ -3133,7 +3184,11 @@ watch(grid, () => { clearSelection(); render() })
   color: var(--plum-3);
 }
 .pb-cell .input { padding: 0.25rem 0.4rem; font-size: 0.78rem; width: 72px; }
-.pb-cell .select { padding: 0.25rem 0.5rem; font-size: 0.78rem; }
+.pb-cell .select {
+  padding: 0.25rem 1.7rem 0.25rem 0.5rem;
+  font-size: 0.78rem;
+  background-position: right 0.55rem center;
+}
 .pb-cell .slider { accent-color: var(--sakura); cursor: pointer; }
 .pb-hint {
   font-size: 0.7rem;
@@ -3653,4 +3708,65 @@ watch(grid, () => { clearSelection(); render() })
   transition: opacity var(--transition-fast);
 }
 .my-pal-chip:hover .chip-x { opacity: 0.85; }
+
+/* "press F for fullscreen" tip — top-right of canvas */
+.fs-tip {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.8rem 0.45rem 0.55rem;
+  background: linear-gradient(135deg, #fff 0%, var(--cream-2) 100%);
+  border: 2px solid var(--sakura);
+  border-radius: 999px;
+  box-shadow: 0 4px 14px rgba(255, 107, 157, 0.25);
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 0.78rem;
+  color: var(--plum-1);
+  pointer-events: none;
+  z-index: 20;
+}
+.fs-tip-key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.4rem;
+  height: 1.4rem;
+  padding: 0 0.4rem;
+  background: var(--sakura);
+  color: #fff;
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-weight: 800;
+  font-size: 0.8rem;
+  box-shadow: 0 2px 0 #d75d8a;
+}
+.fs-tip-text { white-space: nowrap; }
+.fs-tip-enter-active, .fs-tip-leave-active {
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+.fs-tip-enter-from { opacity: 0; transform: translateY(-6px) scale(0.92); }
+.fs-tip-leave-to   { opacity: 0; transform: translateY(-4px) scale(0.96); }
+</style>
+
+<!-- non-scoped so body-appended hearts can use these styles -->
+<style>
+@keyframes cursor-heart-float {
+  0%   { opacity: 0;   transform: translate(0, 0) rotate(0deg) scale(0.4); }
+  18%  { opacity: 0.95; }
+  100% { opacity: 0;   transform: translate(var(--heart-dx, 0px), -70px) rotate(var(--heart-rot, 0deg)) scale(1.1); }
+}
+.cursor-heart {
+  position: fixed;
+  pointer-events: none;
+  z-index: 99999;
+  line-height: 1;
+  font-family: "Segoe UI Symbol", "Apple Color Emoji", sans-serif;
+  text-shadow: 0 1px 3px rgba(255, 107, 157, 0.45);
+  will-change: transform, opacity;
+  animation: cursor-heart-float 1.2s ease-out forwards;
+}
 </style>
