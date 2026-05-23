@@ -54,6 +54,9 @@
         </div>
         <button v-if="!REMOTE_ENABLED" class="card-x" @click.stop="onRemove(w)"
                 title="从画廊删除">✕</button>
+        <button v-else-if="isMine(w.id)" class="card-x mine" @click.stop="onUnpublish(w)"
+                title="取消发布（只对你自己发布的作品有效）">✕</button>
+        <span v-if="isMine(w.id)" class="mine-badge">我的</span>
       </div>
     </div>
 
@@ -74,9 +77,14 @@
           <span class="ms-chip">{{ fmtDate(preview.createdAt) }}</span>
           <span class="lb-spacer"></span>
           <a class="btn btn-ghost btn-xs" :href="preview.thumbnail"
-             :download="preview.title + '.jpg'"
+             :download="preview.title + '.png'"
              target="_blank" rel="noopener">⬇ 下载</a>
-          <button v-if="!REMOTE_ENABLED"
+          <button v-if="REMOTE_ENABLED && isMine(preview.id)"
+                  class="btn btn-ghost btn-xs danger-text"
+                  @click="onUnpublish(preview); preview = null">
+            🗑 取消发布
+          </button>
+          <button v-else-if="!REMOTE_ENABLED"
                   class="btn btn-ghost btn-xs danger-text"
                   @click="onRemove(preview); preview = null">
             🗑 删除
@@ -89,13 +97,13 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import BeadTabs from '../components/BeadTabs.vue'
 import { useGallery, type GalleryWork } from '../composables/useGallery'
 
 const {
   state, loading, error,
-  remove, clearAll, refresh, ensureHydrated,
+  remove, unpublish, isMine, clearAll, refresh, ensureHydrated,
   MAX_WORKS, REMOTE_ENABLED,
 } = useGallery()
 
@@ -120,6 +128,22 @@ async function onRemove(w: GalleryWork) {
     })
     remove(w.id)
   } catch { /* cancelled */ }
+}
+
+async function onUnpublish(w: GalleryWork) {
+  try {
+    await ElMessageBox.confirm(
+      `取消发布「${w.title}」？这会把它从画廊上彻底删掉（所有人都看不到了），不能撤销。`,
+      '取消发布',
+      { confirmButtonText: '取消发布', cancelButtonText: '再想想', type: 'warning' },
+    )
+  } catch { return /* cancelled */ }
+  try {
+    await unpublish(w.id)
+    ElMessage.success(`「${w.title}」已从画廊取消发布`)
+  } catch (e: any) {
+    ElMessage.error(`取消发布失败：${e?.message || e}`)
+  }
 }
 async function onClearAll() {
   try {
@@ -213,6 +237,17 @@ async function onClearAll() {
 }
 .work-card:hover .card-x { opacity: 1; }
 .card-x:hover { background: var(--bad); color: #fff; }
+.card-x.mine { opacity: 1; background: var(--sakura-glow); color: var(--sakura-deep); border: 1.5px solid var(--sakura); }
+.card-x.mine:hover { background: var(--bad); color: #fff; border-color: var(--bad); }
+.mine-badge {
+  position: absolute; top: 0.4rem; left: 0.4rem;
+  background: var(--sakura); color: #fff;
+  font-family: var(--font-mono); font-weight: 800;
+  font-size: 0.6rem; padding: 0.1rem 0.45rem;
+  border-radius: var(--radius-pill);
+  box-shadow: 0 1px 0 var(--sakura-deep);
+  pointer-events: none;
+}
 
 /* lightbox */
 .lightbox {

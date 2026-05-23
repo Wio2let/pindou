@@ -28,6 +28,7 @@ export interface GalleryWork {
   uniqueColors: number
   beadShape: 'circle' | 'square' | 'fill'
   thumbnail: string       // resolved URL (or data: URL in local mode)
+  thumbPath?: string      // remote-only: storage object path, used to also delete the file
 }
 
 interface DBRow {
@@ -43,6 +44,7 @@ interface DBRow {
 }
 
 const LOCAL_STORAGE_KEY = 'bead-gallery-v1'
+const MY_PUBLISHES_KEY = 'bead-my-publishes-v1'   // ids of works this browser published
 
 // ---- local fallback persistence -------------------------------------------
 function loadLocal(): GalleryWork[] {
@@ -70,6 +72,22 @@ const loading = ref<boolean>(REMOTE_ENABLED)
 const error = ref<string | null>(null)
 let hydrated = !REMOTE_ENABLED
 
+// Track which work-ids were published from THIS browser so the gallery only
+// offers "取消发布" on works the user actually owns. Plain localStorage list;
+// other browsers / devices won't see it (as intended — only the publisher
+// gets the take-down handle).
+function loadMyPublishes(): Set<string> {
+  try {
+    const raw = localStorage.getItem(MY_PUBLISHES_KEY)
+    const arr = raw ? JSON.parse(raw) : []
+    return new Set(Array.isArray(arr) ? arr : [])
+  } catch { return new Set() }
+}
+function saveMyPublishes(s: Set<string>) {
+  try { localStorage.setItem(MY_PUBLISHES_KEY, JSON.stringify([...s])) } catch {}
+}
+const myPublishedIds = ref<Set<string>>(loadMyPublishes())
+
 function publicUrlFor(path: string): string {
   if (!supabase) return path
   const { data } = supabase.storage.from(GALLERY_BUCKET).getPublicUrl(path)
@@ -87,6 +105,7 @@ function rowToWork(r: DBRow): GalleryWork {
     uniqueColors: r.unique_colors,
     beadShape: r.bead_shape,
     thumbnail: publicUrlFor(r.thumb_path),
+    thumbPath: r.thumb_path,
   }
 }
 
@@ -176,6 +195,9 @@ export function useGallery() {
       state.value.unshift(entry)
       // cap displayed list (server still keeps everything)
       while (state.value.length > MAX_WORKS) state.value.pop()
+      // remember this id locally so the gallery can show "取消发布" for it
+      myPublishedIds.value.add(entry.id)
+      saveMyPublishes(myPublishedIds.value)
       return entry
     }
     // local fallback
@@ -196,20 +218,61 @@ export function useGallery() {
     return entry
   }
 
-  /**
-   * Remove an entry from local state. In remote mode this hides it locally
-   * for this session — actual server-side deletion is intentionally not
-   * exposed via the anon role (anyone with the URL could otherwise wipe the
-   * gallery). For local mode it really removes the entry.
-   */
+  /** Local-only remove (used by the legacy local-storage fallback). */
   function remove(id: string) {
     const idx = state.value.findIndex(w => w.id === id)
     if (idx >= 0) state.value.splice(idx, 1)
+    myPublishedIds.value.delete(id)
     if (!REMOTE_ENABLED) saveLocal(state.value)
+    saveMyPublishes(myPublishedIds.value)
   }
+
+  /** Was this work published from THIS browser? */
+  function isMine(id: string): boolean {
+    return myPublishedIds.value.has(id)
+  }
+
+  /**
+   * Take a work down from the gallery. In remote mode this deletes both the
+   * row and the storage file; in local mode it just drops the entry. We only
+   * call this for works the current browser actually published — the gallery
+   * UI hides the button otherwise.
+   */
+  async function unpublish(id: string): Promise<void> {
+    if (REMOTE_ENABLED && supabase) {
+      // remove from local state first so the UI reacts immediately
+      const work = state.value.find(w => w.id === id)
+      const idx = state.value.findIndex(w => w.id === id)
+      if (idx >= 0) state.value.splice(idx, 1)
+      myPublishedIds.value.delete(id)
+      saveMyPublishes(myPublishedIds.value)
+      // then delete server-side (row + thumbnail file)
+      try {
+        const { error: delErr } = await supabase
+          .from(GALLERY_TABLE)
+          .delete()
+          .eq('id', id)
+        if (delErr) throw delErr
+        if (work?.thumbPath) {
+          await supabase.storage.from(GALLERY_BUCKET).remove([work.thumbPath])
+        }
+      } catch (e: any) {
+        // restore on failure so the user sees their work is still up
+        if (work && idx >= 0) state.value.splice(idx, 0, work)
+        myPublishedIds.value.add(id)
+        saveMyPublishes(myPublishedIds.value)
+        throw e
+      }
+      return
+    }
+    remove(id)
+  }
+
   function clearAll() {
     state.value = []
+    myPublishedIds.value = new Set()
     if (!REMOTE_ENABLED) saveLocal(state.value)
+    saveMyPublishes(myPublishedIds.value)
   }
   function get(id: string): GalleryWork | undefined {
     return state.value.find(w => w.id === id)
@@ -217,7 +280,7 @@ export function useGallery() {
 
   return {
     state, loading, error,
-    publish, remove, clearAll, get,
+    publish, remove, unpublish, isMine, clearAll, get,
     refresh, ensureHydrated,
     MAX_WORKS, REMOTE_ENABLED,
   }
