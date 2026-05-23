@@ -54,9 +54,11 @@
         </div>
         <button v-if="!REMOTE_ENABLED" class="card-x" @click.stop="onRemove(w)"
                 title="从画廊删除">✕</button>
-        <button v-else-if="isMine(w.id)" class="card-x mine" @click.stop="onUnpublish(w)"
-                title="取消发布（只对你自己发布的作品有效）">✕</button>
-        <span v-if="isMine(w.id)" class="mine-badge">我的</span>
+        <button v-else-if="canDelete(w.id)" class="card-x mine"
+                @click.stop="onUnpublish(w)"
+                :title="isMine(w.id) ? '取消发布' : '管理员：删除这张作品'">✕</button>
+        <span v-if="REMOTE_ENABLED && isMine(w.id)" class="mine-badge">我的</span>
+        <span v-else-if="REMOTE_ENABLED && isAdmin" class="mine-badge admin">管理员</span>
       </div>
     </div>
 
@@ -79,10 +81,10 @@
           <a class="btn btn-ghost btn-xs" :href="preview.thumbnail"
              :download="preview.title + '.png'"
              target="_blank" rel="noopener">⬇ 下载</a>
-          <button v-if="REMOTE_ENABLED && isMine(preview.id)"
+          <button v-if="REMOTE_ENABLED && canDelete(preview.id)"
                   class="btn btn-ghost btn-xs danger-text"
                   @click="onUnpublish(preview); preview = null">
-            🗑 取消发布
+            🗑 {{ isMine(preview.id) ? '取消发布' : '管理员：删除' }}
           </button>
           <button v-else-if="!REMOTE_ENABLED"
                   class="btn btn-ghost btn-xs danger-text"
@@ -100,6 +102,7 @@ import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import BeadTabs from '../components/BeadTabs.vue'
 import { useGallery, type GalleryWork } from '../composables/useGallery'
+import { useAuth } from '../composables/useAuth'
 import { useHeartTrail } from '../composables/useHeartTrail'
 
 // Same cursor-heart particle effect as the studio page
@@ -110,6 +113,13 @@ const {
   remove, unpublish, isMine, clearAll, refresh, ensureHydrated,
   MAX_WORKS, REMOTE_ENABLED,
 } = useGallery()
+
+const { isAdmin } = useAuth()
+
+/** Admin can delete anyone's work; otherwise the standard "only mine" rule. */
+function canDelete(id: string): boolean {
+  return isAdmin.value || isMine(id)
+}
 
 const preview = ref<GalleryWork | null>(null)
 
@@ -251,6 +261,10 @@ async function onClearAll() {
   border-radius: var(--radius-pill);
   box-shadow: 0 1px 0 var(--sakura-deep);
   pointer-events: none;
+}
+.mine-badge.admin {
+  background: #6e4ad0; color: #fff;
+  box-shadow: 0 1px 0 #4d2eaa;
 }
 
 /* lightbox */

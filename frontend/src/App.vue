@@ -6,8 +6,8 @@
           <img :src="brandUrl" alt="" class="brand-img" width="42" height="42" />
         </span>
         <span class="brand-text">
-          <span class="brand-zh">像素拼豆</span>
-          <span class="brand-en">PindouVerse</span>
+          <span class="brand-zh">拼豆世界</span>
+          <span class="brand-en">Bead Universe</span>
         </span>
       </router-link>
 
@@ -33,10 +33,10 @@
       <div class="rail-foot">
         <!-- Auth pill: shown only when Supabase is configured -->
         <div v-if="auth.REMOTE_ENABLED" class="auth-pill"
-             :class="{ on: !!auth.user.value }">
+             :class="{ on: !!auth.user.value, admin: auth.isAdmin.value }">
           <template v-if="auth.user.value">
             <span class="auth-email" :title="auth.user.value.email">
-              {{ shortEmail(auth.user.value.email) }}
+              {{ auth.isAdmin.value ? '👑 ' : '' }}{{ shortEmail(auth.user.value.email) }}
             </span>
             <button class="auth-btn" @click="onSignOut" title="退出登录">↪</button>
           </template>
@@ -356,6 +356,7 @@ onBeforeUnmount(() => {
   background: #fff;
 }
 .auth-pill.on { border-color: var(--sakura-light); background: var(--sakura-glow); }
+.auth-pill.admin { border-color: #6e4ad0; background: rgba(110, 74, 208, 0.10); }
 .auth-cta {
   flex: 1; padding: 0.3rem 0.5rem;
   border: none; background: transparent;

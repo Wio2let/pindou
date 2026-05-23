@@ -15,6 +15,26 @@ import { supabase, REMOTE_ENABLED } from '../lib/supabase'
 const user = ref<User | null>(null)
 const session = ref<Session | null>(null)
 const loading = ref<boolean>(REMOTE_ENABLED)
+const isAdmin = ref<boolean>(false)
+
+/** Username (no '@') logins are mapped to this fake-domain so Supabase still
+ *  sees a valid email. e.g. "root" → "root@pindou.local". */
+const USERNAME_DOMAIN = 'pindou.local'
+
+async function refreshAdminFlag() {
+  if (!supabase || !user.value) { isAdmin.value = false; return }
+  try {
+    const { data, error: e } = await supabase
+      .from('gallery_admins')
+      .select('user_id')
+      .eq('user_id', user.value.id)
+      .maybeSingle()
+    if (e) throw e
+    isAdmin.value = !!data
+  } catch {
+    isAdmin.value = false
+  }
+}
 
 if (REMOTE_ENABLED && supabase) {
   // hydrate from any persisted session
@@ -22,13 +42,22 @@ if (REMOTE_ENABLED && supabase) {
     session.value = data.session
     user.value = data.session?.user ?? null
     loading.value = false
+    refreshAdminFlag()
   }).catch(() => { loading.value = false })
 
   // stay in sync with sign-in / sign-out / token refresh events
   supabase.auth.onAuthStateChange((_event, newSession) => {
     session.value = newSession
     user.value = newSession?.user ?? null
+    refreshAdminFlag()
   })
+}
+
+/** Convert a login input to an email: bare usernames get mapped to the
+ *  pindou.local domain so users can type "root" instead of the fake email. */
+export function resolveLoginEmail(input: string): string {
+  const v = input.trim()
+  return v.includes('@') ? v : `${v}@${USERNAME_DOMAIN}`
 }
 
 export interface SignUpResult {
@@ -75,7 +104,7 @@ export function useAuth() {
   }
 
   return {
-    user, session, loading,
+    user, session, loading, isAdmin,
     signUp, signIn, signOut, resetPassword,
     REMOTE_ENABLED,
   }

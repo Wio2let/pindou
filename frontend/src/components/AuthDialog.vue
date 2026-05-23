@@ -21,10 +21,10 @@
         </div>
 
         <label class="row">
-          <span class="lbl">邮箱</span>
-          <input type="email" v-model="email" class="input"
-                 autocomplete="email"
-                 placeholder="you@example.com"
+          <span class="lbl">邮箱 / 用户名</span>
+          <input type="text" v-model="email" class="input"
+                 autocomplete="username"
+                 placeholder="you@example.com 或纯用户名"
                  @keydown.enter="onSubmit" />
         </label>
         <label class="row">
@@ -52,7 +52,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import { useAuth } from '../composables/useAuth'
+import { useAuth, resolveLoginEmail } from '../composables/useAuth'
 
 const emit = defineEmits<{ close: [] }>()
 const { signIn, signUp, resetPassword } = useAuth()
@@ -68,15 +68,22 @@ async function onSubmit() {
   if (busy.value) return
   errorMsg.value = ''
   info.value = ''
-  if (!email.value.includes('@')) { errorMsg.value = '请填写有效的邮箱'; return }
+  const ident = email.value.trim()
+  if (!ident) { errorMsg.value = '请填写邮箱或用户名'; return }
   if (password.value.length < 6) { errorMsg.value = '密码至少 6 位'; return }
+  const resolved = resolveLoginEmail(ident)
   busy.value = true
   try {
     if (mode.value === 'signin') {
-      await signIn(email.value.trim(), password.value)
+      await signIn(resolved, password.value)
       emit('close')
     } else {
-      const r = await signUp(email.value.trim(), password.value)
+      // Sign-up always needs a real email for confirmation; reject usernames.
+      if (!ident.includes('@')) {
+        errorMsg.value = '注册必须用真实邮箱（管理员账号要在 Supabase 控制台里建）'
+        return
+      }
+      const r = await signUp(resolved, password.value)
       if (r.needsEmailConfirmation) {
         info.value = '注册成功！请到你的邮箱里点确认链接，确认后回来登录。'
       } else {
@@ -91,14 +98,15 @@ async function onSubmit() {
 }
 
 async function onForgot() {
-  if (!email.value.includes('@')) {
-    errorMsg.value = '先在上面填上要重设密码的邮箱'
+  const ident = email.value.trim()
+  if (!ident.includes('@')) {
+    errorMsg.value = '先在上面填上真实的邮箱（用户名形式无法重设密码）'
     return
   }
   busy.value = true
   errorMsg.value = ''
   try {
-    await resetPassword(email.value.trim())
+    await resetPassword(ident)
     info.value = '重设密码的邮件已发送，去邮箱看一下。'
   } catch (e: any) {
     errorMsg.value = e?.message || String(e)
