@@ -159,9 +159,31 @@
          <span v-else-if="highlightMode === 'col'" class="im-tag mono">
            列 {{ highlightCol + 1 }} / {{ grid.width }}
          </span>
-         <span v-else-if="highlightMode === 'color'" class="im-tag mono"
-               :style="{ background: curColorHex || '#fff' }">
-           {{ currentCode || '?' }}
+         <span v-else-if="highlightMode === 'color'" class="im-color-wrap">
+           <button class="im-color-btn"
+                   :style="{ background: curColorHex,
+                             color: chipTextOn(curColorHex),
+                             borderColor: chipBorderOn(curColorHex) }"
+                   @click.stop="showColorPickerInChip = !showColorPickerInChip"
+                   title="点击换高亮的色号">
+             <span class="mono">{{ currentCode || '请选色' }}</span>
+             <span class="im-caret">{{ showColorPickerInChip ? '▴' : '▾' }}</span>
+           </button>
+           <div v-if="showColorPickerInChip" class="im-color-grid"
+                @click.stop @mousedown.stop>
+             <button v-for="c in workingPalette" :key="c.code"
+                     class="im-color-cell"
+                     :class="{ on: currentCode === c.code }"
+                     :style="{ background: c.hex }"
+                     :title="`${c.code} ${c.name}`"
+                     @click="selectColor(c.code); showColorPickerInChip = false">
+               <span class="mono im-color-code"
+                     :style="{ color: chipTextOn(c.hex) }">{{ c.code }}</span>
+             </button>
+             <div v-if="workingPalette.length === 0" class="im-color-empty">
+               色板是空的，先回到工坊设置一下
+             </div>
+           </div>
          </span>
          <span v-else-if="highlightMode === 'rect'" class="im-rect-inline">
            <span class="im-lbl">宽</span>
@@ -994,6 +1016,24 @@ const showHighlightMenu = ref(false)
  *  grid + dim overlay fill the entire viewport. Active whenever any highlight
  *  mode is on, since the toolbar status chip is hidden too. */
 const immersive = computed(() => highlightMode.value !== 'none')
+
+// chip-internal colour picker (only used in colour-highlight mode)
+const showColorPickerInChip = ref(false)
+// close the picker when leaving immersive / colour mode
+watch([immersive, highlightMode], () => { showColorPickerInChip.value = false })
+
+/** Pick a readable foreground colour for text drawn on the given bead hex. */
+function chipTextOn(hex: string): string {
+  if (!hex || hex.length < 7) return '#000'
+  const r = parseInt(hex.slice(1, 3), 16)
+  const g = parseInt(hex.slice(3, 5), 16)
+  const b = parseInt(hex.slice(5, 7), 16)
+  return (r * 299 + g * 587 + b * 114) / 1000 > 145 ? '#000' : '#fff'
+}
+function chipBorderOn(hex: string): string {
+  // pale colours need a darker border so the chip reads on the cream backdrop
+  return chipTextOn(hex) === '#000' ? '#c87b1f' : '#ffd76b'
+}
 
 // --- draggable immersive status chip ----------------------------------------
 // `chipPos` is null until the user moves the chip; while null the CSS default
@@ -3731,6 +3771,54 @@ watch(grid, () => { clearSelection(); render() })
 .im-menu-ico { font-size: 1rem; }
 .im-menu-item > span:nth-child(2) { flex: 1; }
 .im-menu-check { color: #c87b1f; font-weight: 800; }
+
+/* colour picker inside the chip */
+.im-color-wrap { position: relative; display: inline-flex; }
+.im-color-btn {
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  padding: 0.18rem 0.7rem;
+  border: 2px solid #ffd76b;
+  border-radius: 999px;
+  font-family: inherit;
+  font-weight: 800; font-size: 0.78rem;
+  cursor: pointer;
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.1);
+}
+.im-color-btn:hover { filter: brightness(1.04); }
+.im-color-grid {
+  position: absolute; top: calc(100% + 0.4rem); left: 0;
+  min-width: 280px; max-width: 360px;
+  max-height: 280px; overflow-y: auto;
+  background: #fff;
+  border: 2px solid #ffd76b;
+  border-radius: var(--radius-md);
+  box-shadow: 0 6px 24px rgba(255, 184, 74, 0.45);
+  padding: 0.45rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(38px, 1fr));
+  gap: 4px;
+  z-index: 100;
+}
+.im-color-cell {
+  width: 100%; aspect-ratio: 1;
+  border: 1.5px solid rgba(0, 0, 0, 0.15);
+  border-radius: var(--radius-sm);
+  padding: 0;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: transform var(--transition-fast);
+}
+.im-color-cell:hover { transform: scale(1.1); z-index: 2; }
+.im-color-cell.on {
+  border-width: 3px; border-color: #c87b1f;
+  box-shadow: 0 0 0 2px #ffd76b, 0 2px 6px rgba(255, 184, 74, 0.6);
+}
+.im-color-code { font-size: 0.56rem; font-weight: 800; line-height: 1; }
+.im-color-empty {
+  grid-column: 1 / -1;
+  text-align: center; padding: 1rem 0.5rem;
+  font-size: 0.78rem; color: var(--plum-3);
+}
 
 /* rect controls inline inside the chip */
 .im-rect-inline {
