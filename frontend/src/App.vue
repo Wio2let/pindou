@@ -229,16 +229,60 @@ const WEATHER_TABLE: Record<number, { icon: string; desc: string }> = {
 
 let weatherRefreshTimer: number | null = null
 
+/**
+ * Try browser geolocation first (accurate, asks for permission once).
+ * Skip the prompt if permission has been explicitly denied. Return null on
+ * any failure so the caller can fall back to IP-based geolocation.
+ */
+async function tryBrowserGeo(): Promise<{ latitude: number; longitude: number } | null> {
+  if (typeof navigator === 'undefined' || !('geolocation' in navigator)) return null
+  try {
+    if ('permissions' in navigator) {
+      const perm = await navigator.permissions.query({ name: 'geolocation' as PermissionName })
+      if (perm.state === 'denied') return null
+    }
+  } catch { /* some browsers throw on permissions.query — fall through */ }
+  return new Promise((resolve) => {
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
+      () => resolve(null),
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 5 * 60 * 1000 },
+    )
+  })
+}
+
+/** Reverse-geocode a lat/lon to a city name via BigDataCloud (free, CORS). */
+async function reverseGeocode(lat: number, lon: number): Promise<string> {
+  try {
+    const url = `https://api.bigdatacloud.net/data/reverse-geocode-client` +
+      `?latitude=${lat}&longitude=${lon}&localityLanguage=zh`
+    const r = await fetch(url)
+    if (!r.ok) return ''
+    const d = await r.json()
+    return d.city || d.locality || d.principalSubdivision || d.countryName || ''
+  } catch { return '' }
+}
+
 async function loadWeather() {
   try {
-    // 1. IP-based geolocation
-    const locRes = await fetch('https://ipapi.co/json/')
-    if (!locRes.ok) throw new Error('ip lookup failed')
-    const loc = await locRes.json()
-    const lat = Number(loc.latitude), lon = Number(loc.longitude)
-    const city = loc.city || loc.region || loc.country_name || ''
+    let lat = NaN, lon = NaN, city = ''
+    // 1. browser geolocation (accurate; prompts permission once)
+    const geo = await tryBrowserGeo()
+    if (geo) {
+      lat = geo.latitude
+      lon = geo.longitude
+      city = await reverseGeocode(lat, lon)
+    } else {
+      // 2. fall back to IP-based geolocation (rough but no permission)
+      const locRes = await fetch('https://ipapi.co/json/')
+      if (!locRes.ok) throw new Error('ip lookup failed')
+      const loc = await locRes.json()
+      lat = Number(loc.latitude)
+      lon = Number(loc.longitude)
+      city = loc.city || loc.region || loc.country_name || ''
+    }
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) throw new Error('no coords')
-    // 2. weather via Open-Meteo
+    // 3. weather via Open-Meteo
     const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
       `&current=temperature_2m,weather_code,relative_humidity_2m,wind_speed_10m`
     const wRes = await fetch(url)
