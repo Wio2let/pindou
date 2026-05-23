@@ -241,6 +241,15 @@
           <button class="btn btn-ghost btn-sm" @click="showShopDialog = true">
             🛒 购买
           </button>
+          <button class="btn btn-ghost btn-sm" @click="showInventoryDialog = true"
+                  title="我的库存：管理你拥有的拼豆数量">
+            📦 库存
+          </button>
+          <button class="btn btn-ghost btn-sm" @click="onFinishProject"
+                  :class="{ 'finish-confirm': finishConfirm }"
+                  :title="finishConfirm ? '再次点击确认扣减库存' : '把这张图用到的颜色从我的库存里扣掉'">
+            {{ finishConfirm ? '确认扣库存？' : '✅ 此作品已拼完' }}
+          </button>
         </div>
 
         <!-- Live params — adjustable while editing -->
@@ -528,6 +537,12 @@
     @close="showShopDialog = false" />
   </Teleport>
 
+  <!-- Inventory Dialog -->
+  <Teleport to="#app" :disabled="!fullscreen">
+  <BeadInventoryDialog v-if="showInventoryDialog"
+    @close="showInventoryDialog = false" />
+  </Teleport>
+
   <!-- Custom palette picker -->
   <BeadPalettePicker v-if="showPalettePicker"
     :codes="myPaletteCodes"
@@ -601,8 +616,10 @@ import {
 import BeadTabs from '../components/BeadTabs.vue'
 import BeadExportDialog from '../components/BeadExportDialog.vue'
 import BeadShopDialog from '../components/BeadShopDialog.vue'
+import BeadInventoryDialog from '../components/BeadInventoryDialog.vue'
 import BeadPalettePicker from '../components/BeadPalettePicker.vue'
 import BeadImageCropDialog from '../components/BeadImageCropDialog.vue'
+import { useInventory } from '../composables/useInventory'
 
 type Tool = 'paint' | 'erase' | 'wand' | 'wanderase' | 'replace' | 'pick' | 'pan' | 'mirror'
           | 'select' | 'line' | 'rect' | 'ellipse'
@@ -660,6 +677,46 @@ const refFileInput = ref<HTMLInputElement | null>(null)
 // dialogs
 const showExportDialog = ref(false)
 const showShopDialog = ref(false)
+const showInventoryDialog = ref(false)
+const finishConfirm = ref(false)
+let finishConfirmTimer: number | null = null
+const inventory = useInventory()
+
+/**
+ * "此作品已拼完" — two-click confirm to avoid accidental inventory edits.
+ * First click flips the button to "确认扣库存？"; second click within 5s deducts.
+ */
+function onFinishProject() {
+  if (!grid.value) { ElMessage.warning('画布是空的，没什么可以扣的~'); return }
+  if (totalBeads.value === 0) { ElMessage.warning('当前画布没画上任何豆子'); return }
+  if (!finishConfirm.value) {
+    finishConfirm.value = true
+    if (finishConfirmTimer != null) clearTimeout(finishConfirmTimer)
+    finishConfirmTimer = window.setTimeout(() => { finishConfirm.value = false; finishConfirmTimer = null }, 5000)
+    return
+  }
+  // confirmed — do the deduction
+  finishConfirm.value = false
+  if (finishConfirmTimer != null) { clearTimeout(finishConfirmTimer); finishConfirmTimer = null }
+  const result = inventory.deductByCounts(colorCounts.value)
+  ElMessage.success(`已从库存中扣减 ${result.totalDeducted} 颗豆子`)
+  if (result.insufficient.length > 0) {
+    const list = result.insufficient.slice(0, 4)
+      .map(i => `${i.code}(差${i.needed - i.had})`).join('、')
+    ElMessage.warning(
+      `这些色号实际库存不够：${list}${result.insufficient.length > 4 ? ` 等 ${result.insufficient.length} 色` : ''}`
+    )
+  }
+  if (result.lowStock.length > 0) {
+    const list = result.lowStock.slice(0, 5)
+      .map(l => `${l.code}(剩${l.remaining})`).join('、')
+    ElMessage({
+      type: 'warning',
+      duration: 3000,
+      message: `⚠ 库存补货提醒：${list}${result.lowStock.length > 5 ? ` 等 ${result.lowStock.length} 色` : ''} 已低于 ${inventory.state.value.threshold} 颗`,
+    })
+  }
+}
 const showPalettePicker = ref(false)
 const exportPreview = ref('')        // export-dialog preview — with grid lines
 const exportPreviewPlain = ref('')   // export-dialog preview — without grid lines
@@ -3094,6 +3151,17 @@ watch(grid, () => { clearSelection(); render() })
   flex-wrap: wrap;
 }
 .tool-group { display: flex; align-items: center; gap: 0.25rem; }
+/* "此作品已拼完" button — pulsing pink when waiting for confirmation click */
+.btn.finish-confirm {
+  background: var(--sakura) !important;
+  color: #fff !important;
+  border-color: var(--sakura-deep) !important;
+  animation: finish-pulse 1.1s ease-in-out infinite;
+}
+@keyframes finish-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--sakura-ring); }
+  50%      { box-shadow: 0 0 0 6px rgba(255, 107, 157, 0); }
+}
 .tool-btn {
   width: 32px; height: 32px;
   border: 2px solid var(--cream-4);
