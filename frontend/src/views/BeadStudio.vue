@@ -208,19 +208,25 @@
             📐 画布尺寸
           </button>
           <div class="tool-divider"></div>
-          <!-- highlight mode group -->
+          <!-- highlight mode: one dropdown with all the highlight kinds -->
           <div class="hi-group">
-            <button class="hi-btn" :class="{ on: highlightMode === 'row' }"
-                    @click="setHighlightMode('row')"
-                    title="高亮某一行（↑↓ 切换；Esc 关闭）">💡 行</button>
-            <button class="hi-btn" :class="{ on: highlightMode === 'col' }"
-                    @click="setHighlightMode('col')"
-                    title="高亮某一列（←→ 切换；Esc 关闭）">💡 列</button>
-            <button class="hi-btn" :class="{ on: highlightMode === 'color' }"
-                    @click="setHighlightMode('color')"
-                    :title="`高亮所有「当前色 ${currentCode || '?'}」豆子（在调色板换色即可换高亮色号）`">
-              💡 色号
+            <button class="hi-btn" :class="{ on: highlightMode !== 'none' }"
+                    @click="showHighlightMenu = !showHighlightMenu"
+                    title="高亮模式（行 / 列 / 色号 / 矩形）—— 高亮中可按 ↑↓←→ 移动、Esc 退出">
+              💡 高亮{{ highlightMode !== 'none' ? ` · ${HIGHLIGHT_LABELS[highlightMode]}` : '' }}
+              <span class="hi-caret">{{ showHighlightMenu ? '▴' : '▾' }}</span>
             </button>
+            <!-- popover menu -->
+            <div v-if="showHighlightMenu" class="hi-menu" @click.stop>
+              <button v-for="m in HIGHLIGHT_OPTIONS" :key="m.id"
+                      class="hi-menu-item" :class="{ on: highlightMode === m.id }"
+                      @click="setHighlightMode(m.id); showHighlightMenu = false">
+                <span class="him-icon">{{ m.icon }}</span>
+                <span class="him-text">{{ m.label }}</span>
+                <span v-if="highlightMode === m.id" class="him-check">✓</span>
+              </button>
+            </div>
+            <!-- live status / per-mode controls -->
             <span v-if="highlightMode === 'row'" class="hi-tag mono">
               行 {{ highlightRow + 1 }} / {{ grid.height }}
             </span>
@@ -230,6 +236,15 @@
             <span v-else-if="highlightMode === 'color'" class="hi-tag mono"
                   :style="{ background: curColorHex || '#fff' }">
               {{ currentCode || '请先选色' }}
+            </span>
+            <span v-else-if="highlightMode === 'rect'" class="hi-rect-ctl">
+              <span class="hi-rect-lbl">宽</span>
+              <input type="number" min="1" :max="grid.width" v-model.number="highlightRect.w"
+                     class="hi-rect-num" @input="clampHighlightRect()" />
+              <span class="hi-rect-lbl">高</span>
+              <input type="number" min="1" :max="grid.height" v-model.number="highlightRect.h"
+                     class="hi-rect-num" @input="clampHighlightRect()" />
+              <span class="hi-rect-pos mono">@({{ highlightRect.x + 1 }},{{ highlightRect.y + 1 }})</span>
             </span>
           </div>
           <div class="tool-divider"></div>
@@ -908,24 +923,62 @@ const tool = ref<Tool>('paint')
 const currentCode = ref('')
 
 // ---- highlight mode -------------------------------------------------------
-// "row" / "col" highlight a single row or column (arrow keys to navigate);
-// "color" dims every cell whose colour code isn't the current paint colour.
-type HighlightMode = 'none' | 'row' | 'col' | 'color'
+// "row" / "col": single row/col (arrow keys to navigate).
+// "color":       every cell whose code matches currentCode.
+// "rect":        a configurable W×H rectangle (arrow keys move it, the W/H
+//                inputs in the toolbar resize it).
+type HighlightMode = 'none' | 'row' | 'col' | 'color' | 'rect'
 const highlightMode = ref<HighlightMode>('none')
 const highlightRow = ref(0)
 const highlightCol = ref(0)
+const highlightRect = ref<{ x: number; y: number; w: number; h: number }>({
+  x: 0, y: 0, w: 8, h: 8,
+})
+const showHighlightMenu = ref(false)
 
-function setHighlightMode(m: Exclude<HighlightMode, 'none'>) {
-  if (highlightMode.value === m) {
+const HIGHLIGHT_LABELS: Record<HighlightMode, string> = {
+  none: '关闭', row: '行', col: '列', color: '色号', rect: '矩形',
+}
+const HIGHLIGHT_OPTIONS = [
+  { id: 'none' as const,  icon: '⊘', label: '关闭高亮' },
+  { id: 'row' as const,   icon: '▤', label: '高亮某一行（↑↓ 切换）' },
+  { id: 'col' as const,   icon: '▥', label: '高亮某一列（←→ 切换）' },
+  { id: 'color' as const, icon: '◉', label: '高亮当前色号' },
+  { id: 'rect' as const,  icon: '▢', label: '高亮自定义矩形（↑↓←→ 移动）' },
+]
+
+/** Clamp the rect's position/size into the current grid bounds. */
+function clampHighlightRect() {
+  const g = grid.value
+  if (!g) return
+  const r = highlightRect.value
+  r.w = Math.max(1, Math.min(g.width,  Math.floor(r.w || 1)))
+  r.h = Math.max(1, Math.min(g.height, Math.floor(r.h || 1)))
+  r.x = Math.max(0, Math.min(g.width  - r.w, r.x))
+  r.y = Math.max(0, Math.min(g.height - r.h, r.y))
+}
+
+function setHighlightMode(m: HighlightMode) {
+  if (m === 'none' || highlightMode.value === m) {
     highlightMode.value = 'none'
-  } else {
-    highlightMode.value = m
-    // pick a sensible starting index when entering row/col mode
-    if (m === 'row' && grid.value) {
-      highlightRow.value = Math.min(highlightRow.value, grid.value.height - 1)
-    }
-    if (m === 'col' && grid.value) {
-      highlightCol.value = Math.min(highlightCol.value, grid.value.width - 1)
+    render()
+    return
+  }
+  highlightMode.value = m
+  const g = grid.value
+  if (g) {
+    if (m === 'row') highlightRow.value = Math.min(highlightRow.value, g.height - 1)
+    if (m === 'col') highlightCol.value = Math.min(highlightCol.value, g.width - 1)
+    if (m === 'rect') {
+      // re-centre the rect when freshly entering rect mode
+      const r = highlightRect.value
+      if (r.x + r.w > g.width || r.y + r.h > g.height || (r.x === 0 && r.y === 0)) {
+        r.w = Math.min(r.w, g.width)
+        r.h = Math.min(r.h, g.height)
+        r.x = Math.floor((g.width - r.w) / 2)
+        r.y = Math.floor((g.height - r.h) / 2)
+      }
+      clampHighlightRect()
     }
   }
   render()
@@ -2755,6 +2808,18 @@ function drawHighlightOverlay(
     ctx.strokeStyle = '#ffd76b'
     ctx.lineWidth = 2
     ctx.strokeRect(ox + c * cell + 0.5, oy + 0.5, cell - 1, H - 1)
+  } else if (highlightMode.value === 'rect') {
+    clampHighlightRect()
+    const r = highlightRect.value
+    // dim the four bands around the rect
+    if (r.y > 0)                 ctx.fillRect(ox, oy, W, r.y * cell)
+    if (r.y + r.h < g.height)    ctx.fillRect(ox, oy + (r.y + r.h) * cell, W, (g.height - r.y - r.h) * cell)
+    if (r.x > 0)                 ctx.fillRect(ox, oy + r.y * cell, r.x * cell, r.h * cell)
+    if (r.x + r.w < g.width)     ctx.fillRect(ox + (r.x + r.w) * cell, oy + r.y * cell, (g.width - r.x - r.w) * cell, r.h * cell)
+    // bright outline on the rect
+    ctx.strokeStyle = '#ffd76b'
+    ctx.lineWidth = 2
+    ctx.strokeRect(ox + r.x * cell + 0.5, oy + r.y * cell + 0.5, r.w * cell - 1, r.h * cell - 1)
   } else if (highlightMode.value === 'color') {
     const target = currentCode.value
     if (!target) {
@@ -3101,6 +3166,20 @@ watch([beadShape, showLabels], () => render())
 // re-render when the highlight target changes (mode toggle, row/col index, or
 // the current paint colour while in colour-highlight mode)
 watch([highlightMode, highlightRow, highlightCol, currentCode], () => render())
+watch(highlightRect, () => render(), { deep: true })
+
+// close the highlight popover when clicking outside it
+watch(showHighlightMenu, (open) => {
+  if (!open) return
+  const onDocClick = (ev: MouseEvent) => {
+    const target = ev.target as HTMLElement | null
+    if (!target) return
+    if (target.closest('.hi-group')) return     // inside group → ignore
+    showHighlightMenu.value = false
+  }
+  // attach on next tick so the very click that opened the menu doesn't close it
+  setTimeout(() => document.addEventListener('click', onDocClick, { once: true }), 0)
+})
 
 // ---- keyboard shortcuts ----
 let panBeforeSpace: Tool | null = null
@@ -3123,6 +3202,7 @@ function onKeyDown(e: KeyboardEvent) {
     e.preventDefault(); deleteSelection(); return
   }
   if (e.key === 'Escape') {
+    if (showHighlightMenu.value) { e.preventDefault(); showHighlightMenu.value = false; return }
     if (showColorPanel.value) { e.preventDefault(); showColorPanel.value = false; return }
     if (highlightMode.value !== 'none') {
       e.preventDefault(); highlightMode.value = 'none'; render(); return
@@ -3131,19 +3211,27 @@ function onKeyDown(e: KeyboardEvent) {
     if (fullscreen.value) { e.preventDefault(); fullscreen.value = false; return }
   }
 
-  // arrow keys cycle the highlighted row/col while in that mode
-  if (highlightMode.value === 'row' || highlightMode.value === 'col') {
+  // arrow keys cycle / move the highlight band while in highlight mode
+  if (highlightMode.value !== 'none') {
     const g = grid.value
     if (g) {
       let consumed = true
-      if (highlightMode.value === 'row' && e.key === 'ArrowUp') {
+      const m = highlightMode.value
+      if (m === 'row' && e.key === 'ArrowUp') {
         highlightRow.value = (highlightRow.value - 1 + g.height) % g.height
-      } else if (highlightMode.value === 'row' && e.key === 'ArrowDown') {
+      } else if (m === 'row' && e.key === 'ArrowDown') {
         highlightRow.value = (highlightRow.value + 1) % g.height
-      } else if (highlightMode.value === 'col' && e.key === 'ArrowLeft') {
+      } else if (m === 'col' && e.key === 'ArrowLeft') {
         highlightCol.value = (highlightCol.value - 1 + g.width) % g.width
-      } else if (highlightMode.value === 'col' && e.key === 'ArrowRight') {
+      } else if (m === 'col' && e.key === 'ArrowRight') {
         highlightCol.value = (highlightCol.value + 1) % g.width
+      } else if (m === 'rect' && (e.key === 'ArrowUp' || e.key === 'ArrowDown'
+                                 || e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+        const r = highlightRect.value
+        if (e.key === 'ArrowUp')    r.y = Math.max(0, r.y - 1)
+        if (e.key === 'ArrowDown')  r.y = Math.min(g.height - r.h, r.y + 1)
+        if (e.key === 'ArrowLeft')  r.x = Math.max(0, r.x - 1)
+        if (e.key === 'ArrowRight') r.x = Math.min(g.width - r.w, r.x + 1)
       } else {
         consumed = false
       }
@@ -3515,8 +3603,11 @@ watch(grid, () => { clearSelection(); render() })
 }
 .tool-divider { width: 1px; height: 22px; background: var(--line-strong); }
 
-/* highlight-mode group — three toggle pills + a live status tag */
-.hi-group { display: flex; align-items: center; gap: 0.25rem; flex-wrap: nowrap; }
+/* highlight-mode dropdown + status / per-mode controls */
+.hi-group {
+  display: flex; align-items: center; gap: 0.35rem;
+  flex-wrap: nowrap; position: relative;
+}
 .hi-btn {
   padding: 0.3rem 0.6rem;
   border: 1.5px solid var(--cream-4);
@@ -3525,6 +3616,7 @@ watch(grid, () => { clearSelection(); render() })
   font-size: 0.74rem; font-weight: 700;
   cursor: pointer; transition: all var(--transition-fast);
   white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 0.3rem;
 }
 .hi-btn:hover { border-color: var(--sakura-light); color: var(--plum-1); }
 .hi-btn.on {
@@ -3533,6 +3625,34 @@ watch(grid, () => { clearSelection(); render() })
   color: #6b3a06;
   box-shadow: 0 2px 0 #c87b1f;
 }
+.hi-caret { font-size: 0.7rem; opacity: 0.7; }
+.hi-menu {
+  position: absolute; top: calc(100% + 0.35rem); left: 0;
+  z-index: 60; min-width: 240px;
+  background: #fff;
+  border: 2px solid var(--sakura-light);
+  border-radius: var(--radius-md);
+  box-shadow: 0 6px 24px var(--sakura-glow);
+  padding: 0.35rem;
+  display: flex; flex-direction: column; gap: 0.15rem;
+}
+.hi-menu-item {
+  display: flex; align-items: center; gap: 0.55rem;
+  padding: 0.45rem 0.6rem;
+  border: none; background: transparent;
+  border-radius: var(--radius-sm);
+  font-size: 0.82rem; font-weight: 600; color: var(--plum-1);
+  cursor: pointer; text-align: left;
+  transition: all var(--transition-fast);
+}
+.hi-menu-item:hover { background: var(--cream-2); }
+.hi-menu-item.on {
+  background: linear-gradient(180deg, #fff5d0, #ffe6a3);
+  color: #6b3a06; font-weight: 800;
+}
+.him-icon { font-size: 1rem; }
+.him-text { flex: 1; }
+.him-check { color: #c87b1f; font-weight: 800; }
 .hi-tag {
   padding: 0.15rem 0.55rem;
   font-size: 0.72rem; font-weight: 800;
@@ -3541,6 +3661,22 @@ watch(grid, () => { clearSelection(); render() })
   border-radius: var(--radius-sm);
   color: var(--plum-1);
 }
+.hi-rect-ctl {
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  padding: 0.1rem 0.5rem;
+  background: var(--cream-2);
+  border: 1.5px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+}
+.hi-rect-lbl { font-size: 0.7rem; color: var(--plum-3); font-weight: 700; }
+.hi-rect-num {
+  width: 48px; padding: 0.1rem 0.35rem;
+  border: 1.5px solid var(--cream-4); border-radius: 4px;
+  font-family: var(--font-mono); font-weight: 700; font-size: 0.78rem;
+  text-align: right; background: #fff; outline: none;
+}
+.hi-rect-num:focus { border-color: var(--sakura); }
+.hi-rect-pos { font-size: 0.7rem; color: var(--plum-2); margin-left: 0.15rem; }
 .export-opt {
   display: inline-flex;
   align-items: center;
