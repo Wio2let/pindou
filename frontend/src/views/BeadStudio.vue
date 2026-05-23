@@ -125,12 +125,34 @@
       <div class="canvas-col card" :class="{ fullscreen, immersive }">
        <!-- Floating status chip — only shown in immersive highlight mode,
             since the toolbar (where the normal status tag lives) is hidden.
-            Draggable anywhere on the screen via mousedown on the chip body. -->
+            Draggable via grip; interactive controls (mode picker + W/H
+            inputs) don't trigger drag thanks to startChipDrag's target check. -->
        <div v-if="immersive" class="immersive-status"
             :style="chipStyle"
-            @mousedown.stop="startChipDrag">
-         <span class="im-grip" title="拖动定位">⠿</span>
-         <span class="im-mode">💡 高亮 · {{ HIGHLIGHT_LABELS[highlightMode] }}</span>
+            @mousedown="startChipDrag">
+         <span class="im-grip" title="按住拖动整个面板">⠿</span>
+
+         <!-- Mode switcher (compact dropdown) -->
+         <div class="im-mode-wrap">
+           <button class="im-mode-btn"
+                   @click.stop="showHighlightMenu = !showHighlightMenu"
+                   title="切换高亮模式">
+             💡 {{ HIGHLIGHT_LABELS[highlightMode] }}
+             <span class="im-caret">{{ showHighlightMenu ? '▴' : '▾' }}</span>
+           </button>
+           <div v-if="showHighlightMenu" class="im-menu"
+                @click.stop @mousedown.stop>
+             <button v-for="m in HIGHLIGHT_OPTIONS" :key="m.id"
+                     class="im-menu-item" :class="{ on: highlightMode === m.id }"
+                     @click="setHighlightMode(m.id); showHighlightMenu = false">
+               <span class="im-menu-ico">{{ m.icon }}</span>
+               <span>{{ m.label }}</span>
+               <span v-if="highlightMode === m.id" class="im-menu-check">✓</span>
+             </button>
+           </div>
+         </div>
+
+         <!-- Mode-specific status / controls -->
          <span v-if="highlightMode === 'row'" class="im-tag mono">
            行 {{ highlightRow + 1 }} / {{ grid.height }}
          </span>
@@ -141,9 +163,18 @@
                :style="{ background: curColorHex || '#fff' }">
            {{ currentCode || '?' }}
          </span>
-         <span v-else-if="highlightMode === 'rect'" class="im-tag mono">
-           {{ highlightRect.w }}×{{ highlightRect.h }} @({{ highlightRect.x + 1 }},{{ highlightRect.y + 1 }})
+         <span v-else-if="highlightMode === 'rect'" class="im-rect-inline">
+           <span class="im-lbl">宽</span>
+           <input type="number" min="1" :max="grid.width" v-model.number="highlightRect.w"
+                  class="im-num" @input="clampHighlightRect()"
+                  @mousedown.stop @click.stop />
+           <span class="im-lbl">高</span>
+           <input type="number" min="1" :max="grid.height" v-model.number="highlightRect.h"
+                  class="im-num" @input="clampHighlightRect()"
+                  @mousedown.stop @click.stop />
+           <span class="im-tag im-tag-pos mono">@({{ highlightRect.x + 1 }},{{ highlightRect.y + 1 }})</span>
          </span>
+
          <span class="im-hint">Esc 退出</span>
        </div>
        <div class="canvas-body">
@@ -980,6 +1011,10 @@ const chipStyle = computed(() => {
 let chipDragOffset: { dx: number; dy: number } | null = null
 
 function startChipDrag(e: MouseEvent) {
+  // Don't start a drag when the click landed on an interactive control —
+  // the buttons / inputs need their own clicks/focus to work.
+  const t = e.target as HTMLElement | null
+  if (t && t.closest('button, input, select, textarea, a')) return
   const el = e.currentTarget as HTMLElement
   const rect = el.getBoundingClientRect()
   // remember pointer offset within the chip so dragging doesn't jump
@@ -3270,7 +3305,8 @@ watch(showHighlightMenu, (open) => {
   const onDocClick = (ev: MouseEvent) => {
     const target = ev.target as HTMLElement | null
     if (!target) return
-    if (target.closest('.hi-group')) return     // inside group → ignore
+    // clicks inside the toolbar group or the immersive chip menu shouldn't close
+    if (target.closest('.hi-group') || target.closest('.immersive-status')) return
     showHighlightMenu.value = false
   }
   // attach on next tick so the very click that opened the menu doesn't close it
@@ -3649,13 +3685,70 @@ watch(grid, () => { clearSelection(); render() })
   padding: 0 0.15rem;
   line-height: 1;
 }
-.im-mode {
+.im-mode-wrap { position: relative; }
+.im-mode-btn {
   background: linear-gradient(180deg, #ffd76b, #ffb84a);
   color: #6b3a06;
-  padding: 0.15rem 0.6rem;
+  padding: 0.18rem 0.7rem;
+  border: none;
   border-radius: 999px;
+  font-family: inherit;
   font-weight: 800;
+  font-size: 0.82rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  box-shadow: 0 2px 0 #c87b1f;
 }
+.im-mode-btn:hover { filter: brightness(1.04); }
+.im-caret { font-size: 0.7rem; opacity: 0.85; }
+.im-menu {
+  position: absolute; top: calc(100% + 0.4rem); left: 0;
+  min-width: 220px;
+  background: #fff;
+  border: 2px solid #ffd76b;
+  border-radius: var(--radius-md);
+  box-shadow: 0 6px 24px rgba(255, 184, 74, 0.45);
+  padding: 0.35rem;
+  display: flex; flex-direction: column; gap: 0.15rem;
+  z-index: 100;
+}
+.im-menu-item {
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  border: none; background: transparent;
+  border-radius: var(--radius-sm);
+  font-family: inherit; font-size: 0.8rem; font-weight: 600;
+  color: var(--plum-1);
+  cursor: pointer; text-align: left;
+}
+.im-menu-item:hover { background: var(--cream-2); }
+.im-menu-item.on {
+  background: linear-gradient(180deg, #fff5d0, #ffe6a3);
+  color: #6b3a06; font-weight: 800;
+}
+.im-menu-ico { font-size: 1rem; }
+.im-menu-item > span:nth-child(2) { flex: 1; }
+.im-menu-check { color: #c87b1f; font-weight: 800; }
+
+/* rect controls inline inside the chip */
+.im-rect-inline {
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  padding: 0.1rem 0.5rem;
+  background: var(--cream-2);
+  border: 1.5px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+}
+.im-lbl { font-size: 0.7rem; color: var(--plum-3); font-weight: 700; }
+.im-num {
+  width: 46px; padding: 0.05rem 0.35rem;
+  border: 1.5px solid var(--cream-4); border-radius: 4px;
+  font-family: var(--font-mono); font-weight: 700; font-size: 0.78rem;
+  text-align: right; background: #fff; outline: none;
+}
+.im-num:focus { border-color: var(--sakura); }
+.im-tag-pos { background: transparent; border: none; font-size: 0.72rem; padding: 0; }
 .im-tag {
   padding: 0.15rem 0.55rem;
   background: var(--cream-2);
