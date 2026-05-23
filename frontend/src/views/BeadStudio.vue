@@ -245,10 +245,14 @@
                   title="我的库存：管理你拥有的拼豆数量">
             📦 库存
           </button>
+          <button class="btn btn-ghost btn-sm" @click="onImportCanvasToInventory"
+                  title="把当前画布上用到的所有色号 × 数量加进我的库存（可用来撤销「完工」的扣减）">
+            ➕ 入库
+          </button>
           <button class="btn btn-ghost btn-sm" @click="onFinishProject"
                   :class="{ 'finish-confirm': finishConfirm }"
                   :title="finishConfirm ? '再次点击确认扣减库存' : '把这张图用到的颜色从我的库存里扣掉'">
-            {{ finishConfirm ? '确认扣库存？' : '✅ 此作品已拼完' }}
+            {{ finishConfirm ? '确认扣库存？' : '🎉 完工' }}
           </button>
         </div>
 
@@ -716,6 +720,25 @@ function onFinishProject() {
       message: `⚠ 库存补货提醒：${list}${result.lowStock.length > 5 ? ` 等 ${result.lowStock.length} 色` : ''} 已低于 ${inventory.state.value.threshold} 颗`,
     })
   }
+}
+
+/**
+ * "➕ 入库" — add the canvas's current colour counts into inventory. Inverse of
+ * "完工"; mainly serves as a one-click safety net to undo an accidental
+ * deduction (re-import puts the exact same amounts back).
+ */
+function onImportCanvasToInventory() {
+  if (!grid.value) { ElMessage.warning('画布是空的，没什么可以入库的~'); return }
+  const counts = colorCounts.value
+  if (counts.size === 0) { ElMessage.warning('当前画布没画上任何豆子'); return }
+  let total = 0
+  for (const [code, n] of counts) {
+    inventory.setCount(code, inventory.getCount(code) + n)
+    total += n
+  }
+  ElMessage.success(
+    `已把画布的 ${counts.size} 个色号 · 共 ${total.toLocaleString()} 颗豆子加入库存`,
+  )
 }
 const showPalettePicker = ref(false)
 const exportPreview = ref('')        // export-dialog preview — with grid lines
