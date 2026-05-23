@@ -4,15 +4,28 @@
 
     <div class="header card">
       <div class="head-left">
-        <span class="title">🖼️ 我的画廊</span>
-        <span class="sub">在工坊点「🎨 发布」就能把作品保存到这里</span>
+        <span class="title">🖼️ {{ REMOTE_ENABLED ? '共享画廊' : '我的画廊' }}</span>
+        <span class="sub">
+          {{ REMOTE_ENABLED
+            ? '所有人的作品都能在这里看到，在工坊点「🎨 发布」即可上传'
+            : '在工坊点「🎨 发布」就能把作品保存到这里（仅存于本机）' }}
+        </span>
       </div>
       <div class="head-right">
+        <span class="stat-chip" v-if="loading">读取中…</span>
         <span class="stat-chip"><b>{{ state.length }}</b> / {{ MAX_WORKS }} 件</span>
-        <button class="btn btn-ghost btn-xs danger-text"
-                v-if="state.length > 0" @click="onClearAll"
+        <button v-if="REMOTE_ENABLED" class="btn btn-ghost btn-xs"
+                @click="refresh" title="重新拉取所有作品"
+                :disabled="loading">🔄 刷新</button>
+        <button v-if="!REMOTE_ENABLED && state.length > 0"
+                class="btn btn-ghost btn-xs danger-text"
+                @click="onClearAll"
                 title="清空整个画廊（不能撤销）">🗑 清空</button>
       </div>
+    </div>
+
+    <div v-if="error" class="error-bar card">
+      ⚠️ 连接画廊服务器失败：{{ error }} —— 可点右上「🔄 刷新」重试
     </div>
 
     <!-- Empty state -->
@@ -39,7 +52,8 @@
           </div>
           <div class="meta-date">{{ fmtDate(w.createdAt) }}</div>
         </div>
-        <button class="card-x" @click.stop="onRemove(w)" title="从画廊删除">✕</button>
+        <button v-if="!REMOTE_ENABLED" class="card-x" @click.stop="onRemove(w)"
+                title="从画廊删除">✕</button>
       </div>
     </div>
 
@@ -60,8 +74,11 @@
           <span class="ms-chip">{{ fmtDate(preview.createdAt) }}</span>
           <span class="lb-spacer"></span>
           <a class="btn btn-ghost btn-xs" :href="preview.thumbnail"
-             :download="preview.title + '.png'">⬇ 下载</a>
-          <button class="btn btn-ghost btn-xs danger-text" @click="onRemove(preview); preview = null">
+             :download="preview.title + '.jpg'"
+             target="_blank" rel="noopener">⬇ 下载</a>
+          <button v-if="!REMOTE_ENABLED"
+                  class="btn btn-ghost btn-xs danger-text"
+                  @click="onRemove(preview); preview = null">
             🗑 删除
           </button>
         </div>
@@ -71,14 +88,20 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { ElMessageBox } from 'element-plus'
 import BeadTabs from '../components/BeadTabs.vue'
 import { useGallery, type GalleryWork } from '../composables/useGallery'
 
-const { state, remove, clearAll, MAX_WORKS } = useGallery()
+const {
+  state, loading, error,
+  remove, clearAll, refresh, ensureHydrated,
+  MAX_WORKS, REMOTE_ENABLED,
+} = useGallery()
 
 const preview = ref<GalleryWork | null>(null)
+
+onMounted(() => { ensureHydrated() })
 
 function fmtDate(ms: number): string {
   const d = new Date(ms)
@@ -127,6 +150,12 @@ async function onClearAll() {
 .stat-chip b { color: var(--sakura-deep); font-family: var(--font-mono); }
 .danger-text { color: var(--bad); }
 .danger-text:hover { background: var(--bad-glow); }
+
+.error-bar {
+  padding: 0.6rem 0.9rem; margin-bottom: 0.7rem;
+  background: var(--bad-glow); border: 1.5px solid var(--bad);
+  color: #b22e3c; font-size: 0.85rem;
+}
 
 .empty {
   display: flex; flex-direction: column; align-items: center; gap: 0.55rem;

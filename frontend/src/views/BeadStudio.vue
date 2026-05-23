@@ -768,45 +768,64 @@ async function onPublishToGallery() {
     title = (r.value || '').trim() || `拼豆图 ${grid.value.width}×${grid.value.height}`
   } catch { return /* cancelled */ }
 
-  // generate the labelled pattern image. Temporarily force showLabels on so
-  // the saved image carries colour-codes regardless of the user's UI setting.
+  // Generate the labelled pattern image. Temporarily force showLabels on so
+  // the saved image always carries colour-codes regardless of the user's UI
+  // setting. Cell size needs to be ≥ ~24 px so the label text (≈ 30 % of cell)
+  // is large enough to read after JPEG encoding.
   const prevLabels = showLabels.value
   showLabels.value = true
   let fullCv: HTMLCanvasElement
   try {
-    // 14px/cell is enough for the label text to render crisply; for a typical
-    // 56×56 grid that yields ~800px which then downsamples cleanly.
-    fullCv = buildPatternCanvas(14, true)
+    // Use a generous source cell size so labels stay legible: 36 px/cell →
+    // label text ≈ 11 px, survives JPEG without smudging into the bead colour.
+    fullCv = buildPatternCanvas(36, true)
   } finally {
     showLabels.value = prevLabels
   }
-  // Downscale to ≤ 520px on the longer edge and encode as high-quality JPEG —
-  // PNG of a labelled pattern is ~250-400 KB and would exhaust localStorage
-  // after a few dozen works; JPEG at q=0.86 stays ~40-80 KB with little
-  // visible loss.
-  const maxDim = 520
-  const scale = Math.min(1, maxDim / Math.max(fullCv.width, fullCv.height))
-  const thumb = document.createElement('canvas')
-  thumb.width = Math.max(1, Math.round(fullCv.width * scale))
-  thumb.height = Math.max(1, Math.round(fullCv.height * scale))
-  const tctx = thumb.getContext('2d')!
-  // paint white first so the JPEG (no alpha) shows a clean background
-  tctx.fillStyle = '#ffffff'
-  tctx.fillRect(0, 0, thumb.width, thumb.height)
-  tctx.imageSmoothingEnabled = true
-  tctx.imageSmoothingQuality = 'high'
-  tctx.drawImage(fullCv, 0, 0, thumb.width, thumb.height)
-  const dataUrl = thumb.toDataURL('image/jpeg', 0.86)
+  // Cap the long edge at 2000 px — wide patterns (>56 cells) need some
+  // downscale to stay under a sensible upload size, but typical 56×56 grids
+  // come in at ~2040 px and only barely downscale, preserving label crispness.
+  const maxDim = 2000
+  const longEdge = Math.max(fullCv.width, fullCv.height)
+  let outCv: HTMLCanvasElement
+  if (longEdge <= maxDim) {
+    outCv = fullCv
+  } else {
+    const scale = maxDim / longEdge
+    outCv = document.createElement('canvas')
+    outCv.width = Math.max(1, Math.round(fullCv.width * scale))
+    outCv.height = Math.max(1, Math.round(fullCv.height * scale))
+    const tctx = outCv.getContext('2d')!
+    tctx.fillStyle = '#ffffff'
+    tctx.fillRect(0, 0, outCv.width, outCv.height)
+    tctx.imageSmoothingEnabled = true
+    tctx.imageSmoothingQuality = 'high'
+    tctx.drawImage(fullCv, 0, 0, outCv.width, outCv.height)
+  }
+  const dataUrl = outCv.toDataURL('image/jpeg', 0.82)
 
-  const entry = gallery.publish({
-    title,
-    width: grid.value.width,
-    height: grid.value.height,
-    totalBeads: totalBeads.value,
-    uniqueColors: colorCounts.value.size,
-    beadShape: beadShape.value,
-    thumbnail: dataUrl,
+  // upload to the gallery (Supabase if configured, else local localStorage)
+  const uploading = ElMessage({
+    type: 'info', duration: 0, showClose: false, message: '🎨 上传中…',
   })
+  let entry: Awaited<ReturnType<typeof gallery.publish>>
+  try {
+    entry = await gallery.publish({
+      title,
+      width: grid.value.width,
+      height: grid.value.height,
+      totalBeads: totalBeads.value,
+      uniqueColors: colorCounts.value.size,
+      beadShape: beadShape.value,
+      thumbnailDataUrl: dataUrl,
+    })
+  } catch (e: any) {
+    uploading.close()
+    ElMessage.error(`发布失败：${e?.message || e}`)
+    return
+  } finally {
+    uploading.close()
+  }
 
   ElMessage({
     type: 'success',

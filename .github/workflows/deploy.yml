@@ -33,6 +33,12 @@ jobs:
       - name: Build
         run: npx vite build
         working-directory: frontend
+        env:
+          # Optional — only set as repo "Secrets and variables" if you want the
+          # shared gallery backend. Without these the site falls back to a
+          # local-only gallery in each visitor's browser.
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
 
       - uses: actions/configure-pages@v5
 
