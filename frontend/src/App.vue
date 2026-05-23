@@ -263,6 +263,10 @@ async function reverseGeocode(lat: number, lon: number): Promise<string> {
   } catch { return '' }
 }
 
+// Nanjing — used as the default location when browser geolocation isn't
+// granted, so 中国大陆访客 the user expects a familiar weather readout.
+const NANJING = { lat: 32.0603, lon: 118.7969, name: '南京' }
+
 async function loadWeather() {
   try {
     let lat = NaN, lon = NaN, city = ''
@@ -273,13 +277,12 @@ async function loadWeather() {
       lon = geo.longitude
       city = await reverseGeocode(lat, lon)
     } else {
-      // 2. fall back to IP-based geolocation (rough but no permission)
-      const locRes = await fetch('https://ipapi.co/json/')
-      if (!locRes.ok) throw new Error('ip lookup failed')
-      const loc = await locRes.json()
-      lat = Number(loc.latitude)
-      lon = Number(loc.longitude)
-      city = loc.city || loc.region || loc.country_name || ''
+      // 2. fall back to a fixed default location (Nanjing) rather than IP
+      //    lookup — IP geo libraries often map mainland-China IPs to random
+      //    nearby cities, which is more confusing than just defaulting.
+      lat = NANJING.lat
+      lon = NANJING.lon
+      city = NANJING.name
     }
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) throw new Error('no coords')
     // 3. weather via Open-Meteo
