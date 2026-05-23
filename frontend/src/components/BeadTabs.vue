@@ -12,6 +12,10 @@
                  :class="{ on: route.path === '/bead-studio/gallery' }">
       🖼️ 像素画廊
     </router-link>
+    <router-link to="/bead-studio/inventory" class="bead-tab"
+                 :class="{ on: route.path === '/bead-studio/inventory' }">
+      📦 我的库存
+    </router-link>
   </div>
 </template>
 

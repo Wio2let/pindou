@@ -375,7 +375,7 @@
           <button class="btn btn-ghost btn-sm" @click="onFinishProject"
                   :class="{ 'finish-confirm': finishConfirm }"
                   :title="finishConfirm ? '再次点击确认扣减库存' : '把这张图用到的颜色从我的库存里扣掉'">
-            {{ finishConfirm ? '确认扣库存？' : '🎉 完工' }}
+            {{ finishConfirm ? '确认扣库存？' : '➖ 完工' }}
           </button>
         </div>
 

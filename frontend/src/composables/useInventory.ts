@@ -1,16 +1,25 @@
 /**
- * useInventory — local bead inventory, persisted in localStorage.
+ * useInventory — bead inventory storage.
  *
  * The user's "我的库存" is a flat map of `MARD code → quantity`. Each "+1"
- * click in the UI bumps the count by BULK (default 500) — typical pack size.
- * "此作品已拼完" deducts the canvas's colour counts from inventory in one go
- * and reports which codes dropped below the user-configurable low-stock
- * threshold so the caller can show a reorder reminder.
+ * click in the UI bumps the count by BULK (default 500). "完工" deducts the
+ * canvas's colour counts in one go and reports which codes dropped below the
+ * configurable low-stock threshold so the caller can show a reorder reminder.
+ *
+ * Persistence:
+ *   • not logged in (or no Supabase configured) — localStorage only
+ *   • logged in — Supabase row in user_inventories is authoritative;
+ *     the local state is hydrated from it on sign-in, and every mutation
+ *     is debounced-upserted back so the user's inventory follows their
+ *     account across devices.
  */
 import { ref, watch } from 'vue'
+import { supabase, REMOTE_ENABLED } from '../lib/supabase'
+import { useAuth } from './useAuth'
 
 const STORAGE_KEY = 'bead-inventory-v1'
 const THRESHOLD_KEY = 'bead-inventory-threshold-v1'
+const TABLE = 'user_inventories'
 
 export const BULK = 500
 export const DEFAULT_THRESHOLD = 100
@@ -35,8 +44,14 @@ function loadState(): InventoryState {
 // Module-level singleton — same inventory whichever component reads it.
 const state = ref<InventoryState>(loadState())
 
+// Set to true while pulling from cloud, so the resulting state.value=... write
+// doesn't trigger another push back up.
+let suppressCloudPush = false
+
 let saveTimer: number | null = null
+let cloudSaveTimer: number | null = null
 watch(state, () => {
+  // localStorage save (always — works as offline cache too)
   if (saveTimer != null) clearTimeout(saveTimer)
   saveTimer = window.setTimeout(() => {
     try {
@@ -44,7 +59,68 @@ watch(state, () => {
       localStorage.setItem(THRESHOLD_KEY, String(state.value.threshold))
     } catch { /* quota / private mode — swallow */ }
   }, 150)
+  // cloud upsert when logged in (debounced; suppressed during hydrate)
+  if (suppressCloudPush) return
+  if (cloudSaveTimer != null) clearTimeout(cloudSaveTimer)
+  cloudSaveTimer = window.setTimeout(() => { pushToCloud() }, 800)
 }, { deep: true })
+
+async function pushToCloud() {
+  if (!REMOTE_ENABLED || !supabase) return
+  const { user } = useAuth()
+  if (!user.value) return
+  await supabase.from(TABLE).upsert({
+    user_id: user.value.id,
+    counts: state.value.counts,
+    threshold: state.value.threshold,
+    updated_at: new Date().toISOString(),
+  })
+}
+
+async function hydrateFromCloud() {
+  if (!REMOTE_ENABLED || !supabase) return
+  const { user } = useAuth()
+  if (!user.value) return
+  try {
+    const { data, error } = await supabase
+      .from(TABLE)
+      .select('counts, threshold')
+      .eq('user_id', user.value.id)
+      .maybeSingle()
+    if (error) throw error
+    if (data) {
+      // cloud row exists → take it as authoritative
+      suppressCloudPush = true
+      state.value = {
+        counts: (data.counts as Record<string, number>) || {},
+        threshold: typeof data.threshold === 'number' ? data.threshold : DEFAULT_THRESHOLD,
+      }
+      // re-enable cloud sync after Vue's microtask flush
+      setTimeout(() => { suppressCloudPush = false }, 50)
+    } else {
+      // no cloud row yet → push current local state up so this device's
+      // pre-login work isn't lost
+      await pushToCloud()
+    }
+  } catch {
+    // network / RLS errors: stay on local state silently
+  }
+}
+
+// Hook auth changes — re-hydrate when a user signs in; reset to localStorage
+// on sign-out so the next visitor on this browser sees their own data.
+if (REMOTE_ENABLED) {
+  const { user } = useAuth()
+  watch(user, (now, prev) => {
+    if (now && now.id !== prev?.id) {
+      hydrateFromCloud()
+    } else if (!now && prev) {
+      suppressCloudPush = true
+      state.value = loadState()
+      setTimeout(() => { suppressCloudPush = false }, 50)
+    }
+  }, { immediate: true })
+}
 
 export interface LowStockEntry { code: string; remaining: number }
 export interface InsufficientEntry { code: string; needed: number; had: number }

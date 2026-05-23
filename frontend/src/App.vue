@@ -145,6 +145,7 @@ const navItems: NavItem[] = [
   { to: '/bead-studio', zh: '拼豆工坊', en: 'Studio', icon: '◇', match: (p) => p === '/bead-studio' },
   { to: '/bead-studio/cards', zh: 'MARD 色卡', en: 'Palette', icon: '▣', match: (p) => p === '/bead-studio/cards' },
   { to: '/bead-studio/gallery', zh: '像素画廊', en: 'Gallery', icon: '✿', match: (p) => p === '/bead-studio/gallery' },
+  { to: '/bead-studio/inventory', zh: '我的库存', en: 'Inventory', icon: '◫', match: (p) => p === '/bead-studio/inventory' },
 ]
 
 function isActive(item: NavItem): boolean {
@@ -158,12 +159,16 @@ const pageTitle = computed(() => {
   if (route.path === '/bead-studio/gallery') {
     return { zh: '像素画廊', en: 'Gallery' }
   }
+  if (route.path === '/bead-studio/inventory') {
+    return { zh: '我的库存', en: 'Inventory' }
+  }
   return { zh: '图像拼豆', en: 'Bead Studio' }
 })
 
 const sectionLabel = computed(() => {
   if (route.path === '/bead-studio/cards') return 'Palette'
   if (route.path === '/bead-studio/gallery') return 'Gallery'
+  if (route.path === '/bead-studio/inventory') return 'Inventory'
   return 'Studio'
 })
 
