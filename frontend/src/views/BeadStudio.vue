@@ -287,6 +287,62 @@
             📐 画布尺寸
           </button>
           <div class="tool-divider"></div>
+          <!-- grid-lines popover: solid + dashed layers, each individually
+               configurable (step / colour / on-off) -->
+          <div class="gl-group">
+            <button class="gl-btn" :class="{ on: gridConfig.solid.enabled || gridConfig.dashed.enabled }"
+                    @click="showGridMenu = !showGridMenu"
+                    title="参考线设置（实线 / 虚线，步长 + 颜色 + 开关）">
+              📏 参考线
+              <span class="gl-caret">{{ showGridMenu ? '▴' : '▾' }}</span>
+            </button>
+            <div v-if="showGridMenu" class="gl-menu" @click.stop @mousedown.stop>
+              <div class="gl-row">
+                <label class="gl-chk">
+                  <input type="checkbox" v-model="gridConfig.solid.enabled" />
+                  <span class="gl-row-title">实线</span>
+                </label>
+                <span class="gl-sub">每</span>
+                <input type="number" min="1" :max="grid.width" class="gl-num"
+                       v-model.number="gridConfig.solid.step"
+                       :disabled="!gridConfig.solid.enabled" />
+                <span class="gl-sub">格</span>
+                <input type="color" class="gl-color"
+                       :value="hexOf(gridConfig.solid.color)"
+                       @input="gridConfig.solid.color = ($event.target as HTMLInputElement).value"
+                       :disabled="!gridConfig.solid.enabled"
+                       title="选颜色" />
+                <input type="number" min="0.5" step="0.5" max="6" class="gl-num gl-num-sm"
+                       v-model.number="gridConfig.solid.width"
+                       :disabled="!gridConfig.solid.enabled"
+                       title="线宽 (px)" />
+              </div>
+              <div class="gl-row">
+                <label class="gl-chk">
+                  <input type="checkbox" v-model="gridConfig.dashed.enabled" />
+                  <span class="gl-row-title">虚线</span>
+                </label>
+                <span class="gl-sub">每</span>
+                <input type="number" min="1" :max="grid.width" class="gl-num"
+                       v-model.number="gridConfig.dashed.step"
+                       :disabled="!gridConfig.dashed.enabled" />
+                <span class="gl-sub">格</span>
+                <input type="color" class="gl-color"
+                       :value="hexOf(gridConfig.dashed.color)"
+                       @input="gridConfig.dashed.color = ($event.target as HTMLInputElement).value"
+                       :disabled="!gridConfig.dashed.enabled"
+                       title="选颜色" />
+                <input type="number" min="0.5" step="0.5" max="6" class="gl-num gl-num-sm"
+                       v-model.number="gridConfig.dashed.width"
+                       :disabled="!gridConfig.dashed.enabled"
+                       title="线宽 (px)" />
+              </div>
+              <div class="gl-foot">
+                <button class="btn btn-ghost btn-xs" @click="resetGridConfig">↺ 重置默认</button>
+              </div>
+            </div>
+          </div>
+          <div class="tool-divider"></div>
           <!-- highlight mode: one dropdown with all the highlight kinds -->
           <div class="hi-group">
             <button class="hi-btn" :class="{ on: highlightMode !== 'none' }"
@@ -789,6 +845,67 @@ const colorLimit = ref(0)       // cap on distinct colors in the result; 0 = unl
 const showLabels = ref(false)   // show MARD codes on every bead (canvas + export)
 const beadShape = ref<BeadShape>('fill')
 const beadSize = ref(2.6)                 // physical bead diameter, mm
+
+// --- configurable grid / reference lines (one solid layer + one dashed) ---
+interface GridLayer {
+  enabled: boolean
+  step: number    // every N cells
+  color: string   // CSS colour
+  width: number   // line width in px
+}
+const GRID_STORAGE_KEY = 'bead-grid-lines-v1'
+function loadGridConfig(): { solid: GridLayer; dashed: GridLayer } {
+  try {
+    const raw = localStorage.getItem(GRID_STORAGE_KEY)
+    if (raw) {
+      const v = JSON.parse(raw)
+      if (v?.solid && v?.dashed) return v
+    }
+  } catch { /* malformed — fall through */ }
+  return {
+    solid:  { enabled: true, step: 10, color: '#e8462a', width: 1.6 },
+    dashed: { enabled: true, step: 5,  color: '#7c5cff', width: 1   },
+  }
+}
+const gridConfig = ref(loadGridConfig())
+const showGridMenu = ref(false)
+watch(gridConfig, (v) => {
+  try { localStorage.setItem(GRID_STORAGE_KEY, JSON.stringify(v)) } catch {}
+  render()
+}, { deep: true })
+
+/** Normalise any CSS-colour string down to a #RRGGBB the <input type="color">
+ *  control can accept (it doesn't accept rgba / named colours). */
+function hexOf(c: string): string {
+  if (!c) return '#000000'
+  const t = c.trim()
+  if (/^#[0-9a-f]{6}$/i.test(t)) return t.toLowerCase()
+  if (/^#[0-9a-f]{3}$/i.test(t)) {
+    return ('#' + t.slice(1).split('').map(ch => ch + ch).join('')).toLowerCase()
+  }
+  const m = t.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i)
+  if (m) {
+    const h = (n: number) => n.toString(16).padStart(2, '0')
+    return ('#' + h(+m[1]) + h(+m[2]) + h(+m[3])).toLowerCase()
+  }
+  return '#000000'
+}
+function resetGridConfig() {
+  gridConfig.value = {
+    solid:  { enabled: true, step: 10, color: '#e8462a', width: 1.6 },
+    dashed: { enabled: true, step: 5,  color: '#7c5cff', width: 1   },
+  }
+}
+// close grid popover on click-outside
+watch(showGridMenu, (open) => {
+  if (!open) return
+  const onDocClick = (ev: MouseEvent) => {
+    const target = ev.target as HTMLElement | null
+    if (target && target.closest('.gl-group')) return
+    showGridMenu.value = false
+  }
+  setTimeout(() => document.addEventListener('click', onDocClick, { once: true }), 0)
+})
 const brushSize = ref(1)                  // paint brush diameter in cells (Shift+wheel)
 const eraserSize = ref(1)                 // eraser diameter in cells (Shift+wheel)
 
@@ -2832,35 +2949,10 @@ function render() {
     }
   }
 
-  // grid lines
+  // grid lines: two configurable layers (dashed under, solid on top)
   if (cell >= 5 && !transforming.value) {
-    ctx.strokeStyle = 'rgba(120,90,90,0.18)'
-    ctx.lineWidth = 1
-    ctx.beginPath()
-    for (let x = cx0; x <= cx1; x++) {
-      const px = ox + x * cell
-      ctx.moveTo(px, oy + cy0 * cell); ctx.lineTo(px, oy + cy1 * cell)
-    }
-    for (let y = cy0; y <= cy1; y++) {
-      const py = oy + y * cell
-      ctx.moveTo(ox + cx0 * cell, py); ctx.lineTo(ox + cx1 * cell, py)
-    }
-    ctx.stroke()
-    // thick every-10 lines
-    ctx.strokeStyle = 'rgba(232,70,42,0.55)'
-    ctx.lineWidth = 1.6
-    ctx.beginPath()
-    for (let x = cx0; x <= cx1; x++) {
-      if (x % 10) continue
-      const px = ox + x * cell
-      ctx.moveTo(px, oy); ctx.lineTo(px, oy + g.height * cell)
-    }
-    for (let y = cy0; y <= cy1; y++) {
-      if (y % 10) continue
-      const py = oy + y * cell
-      ctx.moveTo(ox, py); ctx.lineTo(ox + g.width * cell, py)
-    }
-    ctx.stroke()
+    drawGridLayer(ctx, gridConfig.value.dashed, [6, 4], g, ox, oy, cell)
+    drawGridLayer(ctx, gridConfig.value.solid,  [],     g, ox, oy, cell)
   }
 
   // ---- reference image overlay (on top of beads so it stays visible) ----
@@ -2960,6 +3052,38 @@ function render() {
 
   // free-transform box + handles (drawn on top of the ruler)
   if (transforming.value) drawTransformBox(ctx, cell, ox, oy)
+}
+
+/**
+ * Draw one configurable grid layer: vertical + horizontal lines at every
+ * `cfg.step` cells, in the given colour / width / dash pattern. No-op when
+ * the layer is disabled or the step is < 1.
+ */
+function drawGridLayer(
+  ctx: CanvasRenderingContext2D,
+  cfg: GridLayer,
+  dash: number[],
+  g: { width: number; height: number },
+  ox: number, oy: number, cell: number,
+) {
+  if (!cfg.enabled || !cfg.step || cfg.step < 1) return
+  ctx.save()
+  ctx.strokeStyle = cfg.color
+  ctx.lineWidth = Math.max(0.5, cfg.width || 1)
+  ctx.setLineDash(dash)
+  ctx.beginPath()
+  for (let x = 0; x <= g.width; x++) {
+    if (x % cfg.step !== 0) continue
+    const px = ox + x * cell
+    ctx.moveTo(px, oy); ctx.lineTo(px, oy + g.height * cell)
+  }
+  for (let y = 0; y <= g.height; y++) {
+    if (y % cfg.step !== 0) continue
+    const py = oy + y * cell
+    ctx.moveTo(ox, py); ctx.lineTo(ox + g.width * cell, py)
+  }
+  ctx.stroke()
+  ctx.restore()
 }
 
 /**
@@ -3167,27 +3291,9 @@ function buildPatternCanvas(
     }
   }
   if (withGrid) {
-    // grid lines
-    ctx.strokeStyle = 'rgba(120,90,90,0.25)'
-    ctx.lineWidth = 1
-    ctx.beginPath()
-    for (let x = 0; x <= g.width; x++) {
-      ctx.moveTo(pad + x * cell, pad); ctx.lineTo(pad + x * cell, cv.height)
-    }
-    for (let y = 0; y <= g.height; y++) {
-      ctx.moveTo(pad, pad + y * cell); ctx.lineTo(cv.width, pad + y * cell)
-    }
-    ctx.stroke()
-    ctx.strokeStyle = 'rgba(232,70,42,0.6)'
-    ctx.lineWidth = 2
-    ctx.beginPath()
-    for (let x = 0; x <= g.width; x += 10) {
-      ctx.moveTo(pad + x * cell, pad); ctx.lineTo(pad + x * cell, cv.height)
-    }
-    for (let y = 0; y <= g.height; y += 10) {
-      ctx.moveTo(pad, pad + y * cell); ctx.lineTo(cv.width, pad + y * cell)
-    }
-    ctx.stroke()
+    // grid lines: same configurable layers as the live canvas
+    drawGridLayer(ctx, gridConfig.value.dashed, [6, 4], g, pad, pad, cell)
+    drawGridLayer(ctx, gridConfig.value.solid,  [],     g, pad, pad, cell)
     // ruler numbers — stepped so small (preview) cells stay legible
     const rstep = cell < 14 ? 10 : cell < 22 ? 5 : 1
     ctx.fillStyle = '#fff'
@@ -3977,6 +4083,61 @@ watch(grid, () => { clearSelection(); render() })
   white-space: nowrap;
 }
 .tool-divider { width: 1px; height: 22px; background: var(--line-strong); }
+
+/* grid-lines settings popover */
+.gl-group { position: relative; display: inline-flex; }
+.gl-btn {
+  padding: 0.3rem 0.6rem;
+  border: 1.5px solid var(--cream-4);
+  background: #fff; color: var(--plum-2);
+  border-radius: var(--radius-pill);
+  font-size: 0.74rem; font-weight: 700;
+  cursor: pointer; transition: all var(--transition-fast);
+  white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 0.3rem;
+}
+.gl-btn:hover { border-color: var(--sakura-light); color: var(--plum-1); }
+.gl-btn.on { background: var(--sakura-glow); border-color: var(--sakura); color: var(--sakura-deep); }
+.gl-caret { font-size: 0.7rem; opacity: 0.7; }
+.gl-menu {
+  position: absolute; top: calc(100% + 0.4rem); left: 0;
+  z-index: 80; min-width: 320px;
+  background: #fff;
+  border: 2px solid var(--sakura-light);
+  border-radius: var(--radius-md);
+  box-shadow: 0 6px 24px var(--sakura-glow);
+  padding: 0.55rem 0.65rem;
+  display: flex; flex-direction: column; gap: 0.45rem;
+}
+.gl-row {
+  display: flex; align-items: center; gap: 0.4rem;
+  padding: 0.35rem 0.45rem;
+  background: var(--cream-2);
+  border-radius: var(--radius-sm);
+  font-size: 0.78rem; color: var(--plum-2);
+}
+.gl-chk {
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  cursor: pointer; font-weight: 700; color: var(--plum-1);
+}
+.gl-row-title { font-size: 0.84rem; min-width: 2.5em; }
+.gl-sub { font-size: 0.74rem; color: var(--plum-3); }
+.gl-num {
+  width: 56px; padding: 0.18rem 0.4rem;
+  border: 1.5px solid var(--cream-4); border-radius: var(--radius-sm);
+  font-family: var(--font-mono); font-weight: 700; text-align: right;
+  background: #fff; outline: none; font-size: 0.78rem;
+}
+.gl-num:focus { border-color: var(--sakura); }
+.gl-num:disabled { opacity: 0.4; cursor: not-allowed; }
+.gl-num-sm { width: 50px; margin-left: auto; }
+.gl-color {
+  width: 30px; height: 26px; padding: 0; cursor: pointer;
+  border: 1.5px solid var(--cream-4); border-radius: var(--radius-sm);
+  background: #fff;
+}
+.gl-color:disabled { opacity: 0.4; cursor: not-allowed; }
+.gl-foot { display: flex; justify-content: flex-end; padding-top: 0.15rem; }
 
 /* highlight-mode dropdown + status / per-mode controls */
 .hi-group {
