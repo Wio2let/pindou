@@ -2949,12 +2949,6 @@ function render() {
     }
   }
 
-  // grid lines: two configurable layers (dashed under, solid on top)
-  if (cell >= 5 && !transforming.value) {
-    drawGridLayer(ctx, gridConfig.value.dashed, [6, 4], g, ox, oy, cell)
-    drawGridLayer(ctx, gridConfig.value.solid,  [],     g, ox, oy, cell)
-  }
-
   // ---- reference image overlay (on top of beads so it stays visible) ----
   const refImg = refImage.value
   if (refImg && !transforming.value) {
@@ -3025,6 +3019,13 @@ function render() {
   // column / colour, then draw a bright outline on the focused band.
   if (highlightMode.value !== 'none' && !transforming.value) {
     drawHighlightOverlay(ctx, cell, ox, oy)
+  }
+
+  // grid lines (drawn AFTER the highlight overlay so they stay at full
+  // colour — the dim mask shouldn't fade the reference lines)
+  if (cell >= 5 && !transforming.value) {
+    drawGridLayer(ctx, gridConfig.value.dashed, [6, 4], g, ox, oy, cell)
+    drawGridLayer(ctx, gridConfig.value.solid,  [],     g, ox, oy, cell)
   }
 
   // ruler
