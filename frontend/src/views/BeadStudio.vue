@@ -1279,7 +1279,7 @@ function highlightHintText(m: HighlightMode): string {
   switch (m) {
     case 'row':   return '↑↓ 切换行'
     case 'col':   return '←→ 切换列'
-    case 'color': return '在调色板换色即可换高亮色号'
+    case 'color': return '←→ 切换色号 · 也能在调色板里换'
     case 'rect':  return '↑↓←→ 移动矩形 · 工具栏改宽高'
     default:      return ''
   }
@@ -3517,6 +3517,15 @@ function onKeyDown(e: KeyboardEvent) {
         highlightCol.value = (highlightCol.value - 1 + g.width) % g.width
       } else if (m === 'col' && e.key === 'ArrowRight') {
         highlightCol.value = (highlightCol.value + 1) % g.width
+      } else if (m === 'color' && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+        // cycle through the colours actually on the canvas
+        const list = usedColorsForPicker.value
+        if (list.length > 0) {
+          const cur = list.findIndex(c => c.code === currentCode.value)
+          const delta = e.key === 'ArrowRight' ? 1 : -1
+          const next = ((cur < 0 ? 0 : cur + delta) + list.length) % list.length
+          selectColor(list[next].code)
+        }
       } else if (m === 'rect' && (e.key === 'ArrowUp' || e.key === 'ArrowDown'
                                  || e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
         // Step the rect by its own dimensions so successive presses tile
