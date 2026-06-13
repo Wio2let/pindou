@@ -219,6 +219,17 @@
                  stroke-linecap="round" stroke-linejoin="round"
                  v-html="t.svg"></svg>
           </button>
+          <!-- Mark-mode toggle — dedicated button (not part of the tool loop) -->
+          <button class="rail-btn" :class="{ on: markMode }"
+                  title="点选标记 (J) — 在高亮模式下点格子标记/取消"
+                  @click="markMode = !markMode">
+            <svg class="tool-ico" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2a3 3 0 0 0-3 3c0 .7.25 1.35.66 1.86L5 12l4 4-1 5 5-3 5 3-1-5 4-4-4.66-5.14A3 3 0 0 0 12 2z"/>
+              <circle cx="12" cy="5" r="1" fill="currentColor"/>
+            </svg>
+          </button>
         </div>
         <div class="canvas-main">
         <!-- Toolbar -->
@@ -400,10 +411,6 @@
               <span class="hi-rect-pos mono">@({{ highlightRect.x + 1 }},{{ highlightRect.y + 1 }})</span>
             </span>
             <span v-if="highlightMode !== 'none' && markedCount > 0" class="hi-tag hi-tag-marked mono" title="已标记 · 点击清除" @click.stop="clearAllMarked">✓{{ markedCount }}</span>
-            <label class="hi-chk" title="点选标记模式 (J) — 点击格子标记/取消" @click.stop>
-              <input type="checkbox" v-model="markMode" />
-              <span>点选</span>
-            </label>
           </div>
           <div class="tool-divider"></div>
           <div class="tool-group">
@@ -5305,11 +5312,6 @@ watch(grid, () => { clearSelection(); render() })
   border: 1.5px solid rgba(124,92,255,0.18);
 }
 .dpad-label { font-size: 0.6rem; color: var(--plum-3); font-weight: 800; text-align: center; line-height: 1.1; }
-
-/* ===== checkbox in immersive chip ===== */
-.im-chk { display: inline-flex; align-items: center; gap: 0.25rem; cursor: pointer; user-select: none; }
-.im-chk input { cursor: pointer; }
-.im-chk-lbl { font-size: 0.7rem; font-weight: 700; color: var(--plum-2); }
 
 /* ===== mark buttons & badge ===== */
 .im-mark-btn {
