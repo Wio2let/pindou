@@ -202,10 +202,6 @@
            <button class="im-mark-btn" title="标记本区域" @click.stop="doMark(highlightMode)">+M</button>
            <button class="im-mark-btn im-unmark" title="取消本区域" @click.stop="doUnmark(highlightMode)">-U</button>
          </div>
-         <label class="im-chk" title="开启后点击格子标记/取消" @click.stop>
-           <input type="checkbox" v-model="markMode" />
-           <span class="im-chk-lbl">点选</span>
-         </label>
          <span v-if="markedCount > 0" class="im-tag im-mark-badge" title="清除所有标记" @click.stop="clearAllMarked">✕{{ markedCount }}</span>
 
          <span class="im-hint">Esc 退出</span>
@@ -404,6 +400,10 @@
               <span class="hi-rect-pos mono">@({{ highlightRect.x + 1 }},{{ highlightRect.y + 1 }})</span>
             </span>
             <span v-if="highlightMode !== 'none' && markedCount > 0" class="hi-tag hi-tag-marked mono" title="已标记 · 点击清除" @click.stop="clearAllMarked">✓{{ markedCount }}</span>
+            <label class="hi-chk" title="点选标记模式 (J) — 点击格子标记/取消" @click.stop>
+              <input type="checkbox" v-model="markMode" />
+              <span>点选</span>
+            </label>
           </div>
           <div class="tool-divider"></div>
           <div class="tool-group">
@@ -3348,6 +3348,29 @@ function render() {
   // column / colour, then draw a bright outline on the focused band.
   if (highlightMode.value !== 'none' && !transforming.value) {
     drawHighlightOverlay(ctx, cell, ox, oy)
+    // Draw a tiny corner triangle on every marked cell so they remain
+    // identifiable even when they fall inside the bright zone (e.g. H2
+    // near-white in colour-highlight mode — already at full brightness).
+    if (markedCells.value.size > 0 && cell >= 6) {
+      ctx.save()
+      ctx.fillStyle = 'rgba(255, 215, 0, 0.7)'  // gold triangle
+      const mSize = Math.max(5, cell * 0.28)
+      for (const key of markedCells.value) {
+        const parts = key.split(',')
+        const mx = parseInt(parts[0], 10), my = parseInt(parts[1], 10)
+        if (mx < 0 || mx >= g.width || my < 0 || my >= g.height) continue
+        // skip if grid cell is empty
+        if (!g.cells[my * g.width + mx]) continue
+        const px = ox + mx * cell, py = oy + my * cell
+        ctx.beginPath()
+        ctx.moveTo(px + mSize, py)
+        ctx.lineTo(px, py)
+        ctx.lineTo(px, py + mSize)
+        ctx.closePath()
+        ctx.fill()
+      }
+      ctx.restore()
+    }
     drawMinimap(cx0, cy0, cx1, cy1)
   }
 
@@ -3993,6 +4016,13 @@ function onKeyDown(e: KeyboardEvent) {
     else if (e.key === 'ArrowLeft') dx = -step
     else if (e.key === 'ArrowRight') dx = step
     if (dx || dy) { e.preventDefault(); panCanvasBy(dx, dy); return }
+  }
+
+  // J: toggle per-cell mark mode
+  if (e.key.toLowerCase() === 'j' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    if (highlightMode.value !== 'none') e.preventDefault()
+    if (highlightMode.value !== 'none') markMode.value = !markMode.value
+    return
   }
 
   // undo / redo
