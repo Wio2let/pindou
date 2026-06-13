@@ -1196,6 +1196,34 @@ const highlightRect = ref<{ x: number; y: number; w: number; h: number }>({
 })
 const showHighlightMenu = ref(false)
 
+// ---- persistent "never dim" cells — accumulate across highlight mode switches ----
+const neverDimCells = ref(new Set<string>())
+function snapshotCurrentBrightCells(): Set<string> {
+  const g = grid.value
+  if (!g) return new Set()
+  const s = new Set<string>()
+  const m = highlightMode.value
+  if (m === 'row') {
+    const r = Math.max(0, Math.min(g.height - 1, highlightRow.value))
+    for (let x = 0; x < g.width; x++) s.add(`${x},${r}`)
+  } else if (m === 'col') {
+    const c = Math.max(0, Math.min(g.width - 1, highlightCol.value))
+    for (let y = 0; y < g.height; y++) s.add(`${c},${y}`)
+  } else if (m === 'color') {
+    const code = currentCode.value
+    if (code) for (let i = 0; i < g.cells.length; i++) {
+      if (g.cells[i] === code) s.add(`${i % g.width},${Math.floor(i / g.width)}`)
+    }
+  } else if (m === 'rect') {
+    clampHighlightRect()
+    const r = highlightRect.value
+    for (let y = r.y; y < r.y + r.h && y < g.height; y++)
+      for (let x = r.x; x < r.x + r.w && x < g.width; x++)
+        s.add(`${x},${y}`)
+  }
+  return s
+}
+
 // ---- persistent per-cell marks (bright overlay, survives mode switches) ----
 const markedCells = ref(new Set<string>())
 const MARKED_STORAGE_KEY = 'bead-marked-cells-v2'
@@ -1391,10 +1419,14 @@ function setHighlightMode(m: HighlightMode) {
   // exit path: clicking "关闭高亮" or the same mode again
   if (m === 'none' || highlightMode.value === m) {
     highlightMode.value = 'none'
+    neverDimCells.value = new Set()
     showHighlightMenu.value = false
     render()
     return
   }
+  // Snapshot the current mode's bright cells so they stay bright after
+  // switching to a different mode (union across modes).
+  neverDimCells.value = new Set([...neverDimCells.value, ...snapshotCurrentBrightCells()])
   const isFreshEntry = highlightMode.value === 'none'
   highlightMode.value = m
   const g = grid.value
@@ -3447,7 +3479,7 @@ function drawGridLayer(
  * Marked cells are skipped (kept at original brightness) — no fill/stroke overlay.
  */
 function isMarked(x: number, y: number): boolean {
-  return markedCells.value.has(`${x},${y}`)
+  return neverDimCells.value.has(`${x},${y}`) || markedCells.value.has(`${x},${y}`)
 }
 function drawHighlightOverlay(
   ctx: CanvasRenderingContext2D, cell: number, ox: number, oy: number,
