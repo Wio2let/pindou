@@ -3345,29 +3345,27 @@ function drawMinimap(vx0: number, vy0: number, vx1: number, vy1: number) {
   }
 
   // Reference grid lines (solid + dashed) scaled into the minimap
-  if (scale >= 2) {
-    const drawMiniGrid = (cfg: GridLayer, dash: number[]) => {
-      if (!cfg.enabled || !cfg.step || cfg.step < 1) return
-      ctx.save()
-      ctx.strokeStyle = cfg.color
-      ctx.lineWidth = 1
-      ctx.setLineDash(dash)
-      ctx.globalAlpha = 0.55
-      ctx.beginPath()
-      for (let x = ((cfg.offsetX||0)%cfg.step+cfg.step)%cfg.step; x <= g.width; x += cfg.step) {
-        const px = offX + x * scale
-        ctx.moveTo(px, offY); ctx.lineTo(px, offY + g.height * scale)
-      }
-      for (let y = ((cfg.offsetY||0)%cfg.step+cfg.step)%cfg.step; y <= g.height; y += cfg.step) {
-        const py = offY + y * scale
-        ctx.moveTo(offX, py); ctx.lineTo(offX + g.width * scale, py)
-      }
-      ctx.stroke()
-      ctx.restore()
+  const drawMiniGrid = (cfg: GridLayer, dash: number[]) => {
+    if (!cfg.enabled || !cfg.step || cfg.step < 1) return
+    ctx.save()
+    ctx.strokeStyle = cfg.color
+    ctx.lineWidth = 1
+    ctx.setLineDash(dash)
+    ctx.globalAlpha = 0.55
+    ctx.beginPath()
+    for (let x = ((cfg.offsetX||0)%cfg.step+cfg.step)%cfg.step; x <= g.width; x += cfg.step) {
+      const px = offX + x * scale
+      ctx.moveTo(px, offY); ctx.lineTo(px, offY + g.height * scale)
     }
-    drawMiniGrid(gridConfig.value.solid, [])
-    drawMiniGrid(gridConfig.value.dashed, [4, 3])
+    for (let y = ((cfg.offsetY||0)%cfg.step+cfg.step)%cfg.step; y <= g.height; y += cfg.step) {
+      const py = offY + y * scale
+      ctx.moveTo(offX, py); ctx.lineTo(offX + g.width * scale, py)
+    }
+    ctx.stroke()
+    ctx.restore()
   }
+  drawMiniGrid(gridConfig.value.solid, [])
+  drawMiniGrid(gridConfig.value.dashed, [4, 3])
 
   // Viewport rectangle (red outline) — what portion is visible in the main canvas
   if (vx1 > vx0 && vy1 > vy0) {
