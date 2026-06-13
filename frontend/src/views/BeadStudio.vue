@@ -3311,27 +3311,28 @@ function render() {
 }
 
 // ---- minimap (top-right thumbnail when in immersive highlight mode) ----
-const MINI_W = 540, MINI_H = 390
+const miniW = ref(540)
+const miniH = computed(() => Math.round(miniW.value * 390 / 540))
 function drawMinimap(vx0: number, vy0: number, vx1: number, vy1: number) {
   const cv = minimapRef.value, g = grid.value
   if (!cv || !g || !immersive.value) return
   const dpr = window.devicePixelRatio || 1
-  if (cv.width !== MINI_W * dpr) {
-    cv.style.width = MINI_W + 'px'
-    cv.style.height = MINI_H + 'px'
-    cv.width = MINI_W * dpr
-    cv.height = MINI_H * dpr
+  if (cv.width !== miniW.value * dpr) {
+    cv.style.width = miniW.value + 'px'
+    cv.style.height = miniH.value + 'px'
+    cv.width = miniW.value * dpr
+    cv.height = miniH.value * dpr
   }
   const ctx = cv.getContext('2d')!
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
   // Background
   ctx.fillStyle = '#fdf6f0'
-  ctx.fillRect(0, 0, MINI_W, MINI_H)
+  ctx.fillRect(0, 0, miniW.value, miniH.value)
 
   // Scale the full grid to fit in the minimap
   const pad = 4
-  const aw = MINI_W - pad * 2, ah = MINI_H - pad * 2
+  const aw = miniW.value - pad * 2, ah = miniH.value - pad * 2
   const scale = Math.min(aw / g.width, ah / g.height)
   const offX = pad + (aw - g.width * scale) / 2
   const offY = pad + (ah - g.height * scale) / 2
@@ -3387,51 +3388,26 @@ function drawMinimap(vx0: number, vy0: number, vx1: number, vy1: number) {
   }
 }
 
-// ---- minimap drag-to-zoom ----
+// ---- minimap drag-to-resize ----
 let minimapDragging = false
 let minimapStartY = 0
-let minimapStartZoom = 1
-let minimapStartOffset = { x: 0, y: 0 }
-let minimapAnchor: { x: number; y: number } | null = null
+let minimapStartW = 540
 function minimapOnDown(e: MouseEvent) {
-  const cv = minimapRef.value, g = grid.value
-  if (!cv || !g) return
-  const rect = cv.getBoundingClientRect()
-  const pad = 4
-  const aw = rect.width - pad * 2, ah = rect.height - pad * 2
-  const mmScale = Math.min(aw / g.width, ah / g.height)
-  const offX = pad + (aw - g.width * mmScale) / 2
-  const offY = pad + (ah - g.height * mmScale) / 2
-  const mx = e.clientX - rect.left, my = e.clientY - rect.top
-  const gx = Math.floor((mx - offX) / mmScale)
-  const gy = Math.floor((my - offY) / mmScale)
-  if (gx < 0 || gx >= g.width || gy < 0 || gy >= g.height) return
+  const cv = minimapRef.value
+  if (!cv) return
   minimapDragging = true
   minimapStartY = e.clientY
-  minimapStartZoom = zoom.value
-  minimapStartOffset = { ...offset.value }
-  minimapAnchor = { x: gx, y: gy }
+  minimapStartW = miniW.value
 }
 function minimapOnMove(e: MouseEvent) {
-  if (!minimapDragging || !minimapAnchor) return
-  const g = grid.value, wrap = wrapRef.value
-  if (!g || !wrap) return
+  if (!minimapDragging) return
   const dy = e.clientY - minimapStartY
-  const factor = Math.pow(2, dy / 60)
-  const newZoom = Math.max(0.15, Math.min(4, minimapStartZoom * factor))
-  const oldCell = BASE_CELL * minimapStartZoom
-  const newCell = BASE_CELL * newZoom
-  // Keep the anchor grid cell at the same screen position
-  const oldSx = RULER + minimapStartOffset.x + minimapAnchor.x * oldCell
-  const oldSy = RULER + minimapStartOffset.y + minimapAnchor.y * oldCell
-  const newOx = oldSx - RULER - minimapAnchor.x * newCell
-  const newOy = oldSy - RULER - minimapAnchor.y * newCell
-  zoom.value = newZoom
-  offset.value = { x: newOx, y: newOy }
+  const newW = Math.max(180, Math.min(1200, minimapStartW + dy * 3))
+  miniW.value = newW
   render()
 }
 function minimapOnUp() {
-  if (minimapDragging) minimapDragging = false
+  minimapDragging = false
 }
 
 /**
