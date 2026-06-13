@@ -219,17 +219,6 @@
                  stroke-linecap="round" stroke-linejoin="round"
                  v-html="t.svg"></svg>
           </button>
-          <!-- Mark-mode toggle — dedicated button (not part of the tool loop) -->
-          <button class="rail-btn" :class="{ on: markMode }"
-                  title="点选标记 (J) — 在高亮模式下点格子标记/取消"
-                  @click="markMode = !markMode">
-            <svg class="tool-ico" viewBox="0 0 24 24" fill="none"
-                 stroke="currentColor" stroke-width="2"
-                 stroke-linecap="round" stroke-linejoin="round">
-              <path d="M12 2a3 3 0 0 0-3 3c0 .7.25 1.35.66 1.86L5 12l4 4-1 5 5-3 5 3-1-5 4-4-4.66-5.14A3 3 0 0 0 12 2z"/>
-              <circle cx="12" cy="5" r="1" fill="currentColor"/>
-            </svg>
-          </button>
         </div>
         <div class="canvas-main">
         <!-- Toolbar -->
@@ -855,7 +844,7 @@ import { useHeartTrail } from '../composables/useHeartTrail'
 import AuthDialog from '../components/AuthDialog.vue'
 
 type Tool = 'paint' | 'erase' | 'wand' | 'wanderase' | 'replace' | 'pick' | 'pan' | 'mirror'
-          | 'select' | 'line' | 'rect' | 'ellipse'
+          | 'select' | 'line' | 'rect' | 'ellipse' | 'mark'
 type BeadShape = 'circle' | 'square' | 'fill'
 
 // ---- state ----
@@ -1570,6 +1559,9 @@ const tools: { id: Tool; svg: string; label: string; key: string }[] = [
     '<path d="M14 10V4a2 2 0 0 0-4 0v2"/>' +
     '<path d="M10 10.5V6a2 2 0 0 0-4 0v8"/>' +
     '<path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/>' },
+  { id: 'mark', label: '点选标记', key: 'J', svg:
+    '<path d="M12 2a3 3 0 0 0-3 3c0 .7.25 1.35.66 1.86L5 12l4 4-1 5 5-3 5 3-1-5 4-4-4.66-5.14A3 3 0 0 0 12 2z"/>' +
+    '<circle cx="12" cy="5" r="1" fill="currentColor"/>' },
 ]
 
 // ---- shape tools (line / rect / ellipse) ----
@@ -3171,8 +3163,8 @@ function onDown(e: MouseEvent) {
   const cell = cellAt(e)
   if (cell) {
     // In highlight mode, clicking a non-empty cell toggles that cell's mark
-    // (only when markMode checkbox is checked — off by default)
-    if (highlightMode.value !== 'none' && markMode.value) {
+    // (only when the 'mark' tool is active)
+    if (highlightMode.value !== 'none' && tool.value === 'mark') {
       const g = grid.value
       if (g && g.cells[cell.y * g.width + cell.x]) {
         const key = `${cell.x},${cell.y}`
@@ -3182,6 +3174,7 @@ function onDown(e: MouseEvent) {
       }
       return
     }
+    if (tool.value === 'mark') return
     // snapshot once per action so Ctrl+Z reverts the whole stroke
     // (mirror does its own pushHistory inside mirrorCopy)
     if (['paint', 'erase', 'wand', 'wanderase', 'replace'].includes(tool.value)) pushHistory()
@@ -3948,6 +3941,7 @@ watch(showHighlightMenu, (open) => {
 
 // ---- keyboard shortcuts ----
 let panBeforeSpace: Tool | null = null
+let markBeforeTool: Tool | null = null
 function onKeyDown(e: KeyboardEvent) {
   // ignore while typing in a form field
   const tag = (e.target as HTMLElement)?.tagName
@@ -4025,10 +4019,17 @@ function onKeyDown(e: KeyboardEvent) {
     if (dx || dy) { e.preventDefault(); panCanvasBy(dx, dy); return }
   }
 
-  // J: toggle per-cell mark mode
+  // J: toggle mark tool (per-cell click marking in highlight mode)
   if (e.key.toLowerCase() === 'j' && !e.ctrlKey && !e.metaKey && !e.altKey) {
     if (highlightMode.value !== 'none') e.preventDefault()
-    if (highlightMode.value !== 'none') markMode.value = !markMode.value
+    if (highlightMode.value !== 'none') {
+      if (tool.value === 'mark') {
+        tool.value = markBeforeTool || 'paint'
+      } else {
+        markBeforeTool = tool.value
+        tool.value = 'mark'
+      }
+    }
     return
   }
 
@@ -4120,6 +4121,8 @@ watch(immersive, () => {
 // Leaving the selection tool drops any active selection.
 watch(tool, (nv, ov) => {
   if (ov === 'select' && nv !== 'select') { clearSelection(); render() }
+  if (nv === 'mark') markMode.value = true
+  else if (ov === 'mark') markMode.value = false
 })
 
 
