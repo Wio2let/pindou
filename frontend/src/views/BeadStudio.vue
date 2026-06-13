@@ -202,6 +202,10 @@
            <button class="im-mark-btn" title="标记本区域" @click.stop="doMark(highlightMode)">+M</button>
            <button class="im-mark-btn im-unmark" title="取消本区域" @click.stop="doUnmark(highlightMode)">-U</button>
          </div>
+         <label class="im-chk" title="开启后点击格子标记/取消" @click.stop>
+           <input type="checkbox" v-model="markMode" />
+           <span class="im-chk-lbl">点选</span>
+         </label>
          <span v-if="markedCount > 0" class="im-tag im-mark-badge" title="清除所有标记" @click.stop="clearAllMarked">✕{{ markedCount }}</span>
 
          <span class="im-hint">Esc 退出</span>
@@ -1195,6 +1199,7 @@ const highlightRect = ref<{ x: number; y: number; w: number; h: number }>({
   x: 0, y: 0, w: 8, h: 8,
 })
 const showHighlightMenu = ref(false)
+const markMode = ref(false) // per-cell click marking in highlight mode
 
 // ---- persistent "never dim" cells — accumulate across highlight mode switches ----
 const neverDimCells = ref(new Set<string>())
@@ -3159,7 +3164,8 @@ function onDown(e: MouseEvent) {
   const cell = cellAt(e)
   if (cell) {
     // In highlight mode, clicking a non-empty cell toggles that cell's mark
-    if (highlightMode.value !== 'none') {
+    // (only when markMode checkbox is checked — off by default)
+    if (highlightMode.value !== 'none' && markMode.value) {
       const g = grid.value
       if (g && g.cells[cell.y * g.width + cell.x]) {
         const key = `${cell.x},${cell.y}`
@@ -5270,6 +5276,11 @@ watch(grid, () => { clearSelection(); render() })
   border: 1.5px solid rgba(124,92,255,0.18);
 }
 .dpad-label { font-size: 0.6rem; color: var(--plum-3); font-weight: 800; text-align: center; line-height: 1.1; }
+
+/* ===== checkbox in immersive chip ===== */
+.im-chk { display: inline-flex; align-items: center; gap: 0.25rem; cursor: pointer; user-select: none; }
+.im-chk input { cursor: pointer; }
+.im-chk-lbl { font-size: 0.7rem; font-weight: 700; color: var(--plum-2); }
 
 /* ===== mark buttons & badge ===== */
 .im-mark-btn {
