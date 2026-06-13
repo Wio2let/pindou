@@ -557,6 +557,7 @@
              @touchmove="onTouchMove"
              @touchend="onTouchEnd">
           <canvas ref="canvasRef"></canvas>
+          <canvas v-if="immersive" ref="minimapRef" class="minimap"></canvas>
           <div v-if="hoverTip && !transforming" class="hover-tip" :style="hoverTipStyle">
             {{ hoverTip }}
           </div>
@@ -853,6 +854,7 @@ const fileInput = ref<HTMLInputElement | null>(null)
 const projInput = ref<HTMLInputElement | null>(null)   // .beadproj project file
 const wrapRef = ref<HTMLDivElement | null>(null)
 const canvasRef = ref<HTMLCanvasElement | null>(null)
+const minimapRef = ref<HTMLCanvasElement | null>(null)
 
 const sourceImg = shallowRef<HTMLImageElement | null>(null)
 const sourcePreview = ref('')
@@ -3274,6 +3276,7 @@ function render() {
   // column / colour, then draw a bright outline on the focused band.
   if (highlightMode.value !== 'none' && !transforming.value) {
     drawHighlightOverlay(ctx, cell, ox, oy)
+    drawMinimap(cx0, cy0, cx1, cy1)
   }
 
   // grid lines (drawn AFTER the highlight overlay so they stay at full
@@ -3308,6 +3311,60 @@ function render() {
 
   // free-transform box + handles (drawn on top of the ruler)
   if (transforming.value) drawTransformBox(ctx, cell, ox, oy)
+}
+
+// ---- minimap (top-right thumbnail when in immersive highlight mode) ----
+const MINI_W = 180, MINI_H = 130
+function drawMinimap(vx0: number, vy0: number, vx1: number, vy1: number) {
+  const cv = minimapRef.value, g = grid.value
+  if (!cv || !g || !immersive.value) return
+  const dpr = window.devicePixelRatio || 1
+  if (cv.width !== MINI_W * dpr) {
+    cv.style.width = MINI_W + 'px'
+    cv.style.height = MINI_H + 'px'
+    cv.width = MINI_W * dpr
+    cv.height = MINI_H * dpr
+  }
+  const ctx = cv.getContext('2d')!
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+
+  // Background
+  ctx.fillStyle = '#fdf6f0'
+  ctx.fillRect(0, 0, MINI_W, MINI_H)
+
+  // Scale the full grid to fit in the minimap
+  const pad = 4
+  const aw = MINI_W - pad * 2, ah = MINI_H - pad * 2
+  const scale = Math.min(aw / g.width, ah / g.height)
+  const offX = pad + (aw - g.width * scale) / 2
+  const offY = pad + (ah - g.height * scale) / 2
+
+  // Draw every cell as a tiny rect
+  for (let y = 0; y < g.height; y++) {
+    for (let x = 0; x < g.width; x++) {
+      const code = g.cells[y * g.width + x]
+      if (!code) continue
+      const hex = MARD_COLORS[code]?.hex
+      if (!hex) continue
+      ctx.fillStyle = hex
+      ctx.fillRect(offX + x * scale, offY + y * scale, Math.max(1, Math.ceil(scale)), Math.max(1, Math.ceil(scale)))
+    }
+  }
+
+  // Viewport rectangle (red outline) — what portion is visible in the main canvas
+  if (vx1 > vx0 && vy1 > vy0) {
+    ctx.strokeStyle = '#ff3b30'
+    ctx.lineWidth = 2
+    ctx.strokeRect(offX + vx0 * scale, offY + vy0 * scale, (vx1 - vx0) * scale, (vy1 - vy0) * scale)
+  }
+
+  // Cursor dot showing hover position
+  if (hover.value) {
+    ctx.fillStyle = '#ff3b30'
+    ctx.beginPath()
+    ctx.arc(offX + hover.value.x * scale, offY + hover.value.y * scale, Math.max(3, scale * 2), 0, Math.PI * 2)
+    ctx.fill()
+  }
 }
 
 /**
@@ -4687,6 +4744,16 @@ watch(grid, () => { clearSelection(); render() })
   cursor: crosshair;
 }
 .canvas-wrap canvas { display: block; }
+/* minimap — top-right thumbnail in immersive highlight mode */
+.minimap {
+  position: absolute; top: 10px; right: 10px;
+  border-radius: 8px;
+  border: 2px solid rgba(255,255,255,0.7);
+  box-shadow: 0 3px 14px rgba(0,0,0,0.2);
+  pointer-events: none;
+  z-index: 10;
+  background: #fdf6f0;
+}
 .hover-tip {
   position: absolute;
   background: var(--plum-1);
