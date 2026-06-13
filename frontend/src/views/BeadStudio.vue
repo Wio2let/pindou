@@ -1205,10 +1205,10 @@ function snapshotCurrentBrightCells(): Set<string> {
   const m = highlightMode.value
   if (m === 'row') {
     const r = Math.max(0, Math.min(g.height - 1, highlightRow.value))
-    for (let x = 0; x < g.width; x++) s.add(`${x},${r}`)
+    for (let x = 0; x < g.width; x++) if (g.cells[r * g.width + x]) s.add(`${x},${r}`)
   } else if (m === 'col') {
     const c = Math.max(0, Math.min(g.width - 1, highlightCol.value))
-    for (let y = 0; y < g.height; y++) s.add(`${c},${y}`)
+    for (let y = 0; y < g.height; y++) if (g.cells[y * g.width + c]) s.add(`${c},${y}`)
   } else if (m === 'color') {
     const code = currentCode.value
     if (code) for (let i = 0; i < g.cells.length; i++) {
@@ -1219,7 +1219,7 @@ function snapshotCurrentBrightCells(): Set<string> {
     const r = highlightRect.value
     for (let y = r.y; y < r.y + r.h && y < g.height; y++)
       for (let x = r.x; x < r.x + r.w && x < g.width; x++)
-        s.add(`${x},${y}`)
+        if (g.cells[y * g.width + x]) s.add(`${x},${y}`)
   }
   return s
 }
@@ -1253,9 +1253,10 @@ function clearAllMarked() {
 function toggleMarkRow(rowIdx: number) {
   const g = grid.value; if (!g) return
   let anyMarked = false
-  for (let x = 0; x < g.width; x++) { if (markedCells.value.has(`${x},${rowIdx}`)) { anyMarked = true; break } }
+  for (let x = 0; x < g.width; x++) { if (g.cells[rowIdx * g.width + x] && markedCells.value.has(`${x},${rowIdx}`)) { anyMarked = true; break } }
   const s = markedCells.value
   for (let x = 0; x < g.width; x++) {
+    if (!g.cells[rowIdx * g.width + x]) continue
     const key = `${x},${rowIdx}`
     if (anyMarked) s.delete(key); else s.add(key)
   }
@@ -1265,9 +1266,10 @@ function toggleMarkRow(rowIdx: number) {
 function toggleMarkCol(colIdx: number) {
   const g = grid.value; if (!g) return
   let anyMarked = false
-  for (let y = 0; y < g.height; y++) { if (markedCells.value.has(`${colIdx},${y}`)) { anyMarked = true; break } }
+  for (let y = 0; y < g.height; y++) { if (g.cells[y * g.width + colIdx] && markedCells.value.has(`${colIdx},${y}`)) { anyMarked = true; break } }
   const s = markedCells.value
   for (let y = 0; y < g.height; y++) {
+    if (!g.cells[y * g.width + colIdx]) continue
     const key = `${colIdx},${y}`
     if (anyMarked) s.delete(key); else s.add(key)
   }
@@ -1297,13 +1299,14 @@ function toggleMarkRect() {
   let anyMarked = false
   for (let y = r.y; y < r.y + r.h && y < g.height; y++) {
     for (let x = r.x; x < r.x + r.w && x < g.width; x++) {
-      if (markedCells.value.has(`${x},${y}`)) { anyMarked = true; break }
+      if (g.cells[y * g.width + x] && markedCells.value.has(`${x},${y}`)) { anyMarked = true; break }
     }
     if (anyMarked) break
   }
   const s = markedCells.value
   for (let y = r.y; y < r.y + r.h && y < g.height; y++) {
     for (let x = r.x; x < r.x + r.w && x < g.width; x++) {
+      if (!g.cells[y * g.width + x]) continue
       const key = `${x},${y}`
       if (anyMarked) s.delete(key); else s.add(key)
     }
@@ -3479,6 +3482,11 @@ function drawGridLayer(
  * Marked cells are skipped (kept at original brightness) — no fill/stroke overlay.
  */
 function isMarked(x: number, y: number): boolean {
+  // transparent/empty cells should never be "marked" — the dim overlay
+  // must still apply to them so the user can distinguish empty from filled.
+  const g = grid.value
+  if (!g) return false
+  if (!g.cells[y * g.width + x]) return false
   return neverDimCells.value.has(`${x},${y}`) || markedCells.value.has(`${x},${y}`)
 }
 function drawHighlightOverlay(
