@@ -3307,7 +3307,7 @@ function render() {
 }
 
 // ---- minimap (top-right thumbnail when in immersive highlight mode) ----
-const MINI_W = 180, MINI_H = 130
+const MINI_W = 360, MINI_H = 260
 function drawMinimap(vx0: number, vy0: number, vx1: number, vy1: number) {
   const cv = minimapRef.value, g = grid.value
   if (!cv || !g || !immersive.value) return
