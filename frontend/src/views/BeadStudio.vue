@@ -198,10 +198,10 @@
                   @mousedown.stop @click.stop />
            <span class="im-tag im-tag-pos mono">@({{ highlightRect.x + 1 }},{{ highlightRect.y + 1 }})</span>
          </span>
-         <button v-if="highlightMode === 'row'" class="im-mark-btn" title="点击标记/取消本行" @click.stop="toggleMarkRow(highlightRow)">🏷</button>
-         <button v-if="highlightMode === 'col'" class="im-mark-btn" title="点击标记/取消本列" @click.stop="toggleMarkCol(highlightCol)">🏷</button>
-         <button v-if="highlightMode === 'color'" class="im-mark-btn" title="点击标记/取消本色的所有格子" @click.stop="toggleMarkCode(currentCode)">🏷</button>
-         <button v-if="highlightMode === 'rect'" class="im-mark-btn" title="点击标记/取消矩形区域" @click.stop="toggleMarkRect()">🏷</button>
+         <div class="im-mark-group" v-if="highlightMode !== 'none'">
+           <button class="im-mark-btn" title="标记本区域" @click.stop="doMark(highlightMode)">+M</button>
+           <button class="im-mark-btn im-unmark" title="取消本区域" @click.stop="doUnmark(highlightMode)">-U</button>
+         </div>
          <span v-if="markedCount > 0" class="im-tag im-mark-badge" title="清除所有标记" @click.stop="clearAllMarked">✕{{ markedCount }}</span>
 
          <span class="im-hint">Esc 退出</span>
@@ -1249,69 +1249,101 @@ watch(markedCells, () => { saveMarkedState(); render() }, { deep: true })
 function clearAllMarked() {
   markedCells.value = new Set()
 }
-/** In row highlight mode: toggle all cells in the given row. */
-function toggleMarkRow(rowIdx: number) {
+/** Mark all non-empty cells in the given row. */
+function markRow(rowIdx: number) {
   const g = grid.value; if (!g) return
-  let anyMarked = false
-  for (let x = 0; x < g.width; x++) { if (g.cells[rowIdx * g.width + x] && markedCells.value.has(`${x},${rowIdx}`)) { anyMarked = true; break } }
   const s = markedCells.value
   for (let x = 0; x < g.width; x++) {
     if (!g.cells[rowIdx * g.width + x]) continue
-    const key = `${x},${rowIdx}`
-    if (anyMarked) s.delete(key); else s.add(key)
+    s.add(`${x},${rowIdx}`)
   }
   markedCells.value = new Set(s)
 }
-/** In col highlight mode: toggle all cells in the given column. */
-function toggleMarkCol(colIdx: number) {
+function unmarkRow(rowIdx: number) {
   const g = grid.value; if (!g) return
-  let anyMarked = false
-  for (let y = 0; y < g.height; y++) { if (g.cells[y * g.width + colIdx] && markedCells.value.has(`${colIdx},${y}`)) { anyMarked = true; break } }
+  const s = markedCells.value
+  for (let x = 0; x < g.width; x++) {
+    if (!g.cells[rowIdx * g.width + x]) continue
+    s.delete(`${x},${rowIdx}`)
+  }
+  markedCells.value = new Set(s)
+}
+/** Mark all non-empty cells in the given column. */
+function markCol(colIdx: number) {
+  const g = grid.value; if (!g) return
   const s = markedCells.value
   for (let y = 0; y < g.height; y++) {
     if (!g.cells[y * g.width + colIdx]) continue
-    const key = `${colIdx},${y}`
-    if (anyMarked) s.delete(key); else s.add(key)
+    s.add(`${colIdx},${y}`)
   }
   markedCells.value = new Set(s)
 }
-/** In color highlight mode: toggle all cells matching the given color code. */
-function toggleMarkCode(code: string) {
+function unmarkCol(colIdx: number) {
   const g = grid.value; if (!g) return
-  let anyMarked = false
-  for (let i = 0; i < g.cells.length; i++) {
-    if (g.cells[i] !== code) continue
-    const x = i % g.width, y = Math.floor(i / g.width)
-    if (markedCells.value.has(`${x},${y}`)) { anyMarked = true; break }
+  const s = markedCells.value
+  for (let y = 0; y < g.height; y++) {
+    if (!g.cells[y * g.width + colIdx]) continue
+    s.delete(`${colIdx},${y}`)
   }
+  markedCells.value = new Set(s)
+}
+/** Mark all cells matching the given color code. */
+function markCode(code: string) {
+  if (!code) return
+  const g = grid.value; if (!g) return
   const s = markedCells.value
   for (let i = 0; i < g.cells.length; i++) {
     if (g.cells[i] !== code) continue
-    const key = `${i % g.width},${Math.floor(i / g.width)}`
-    if (anyMarked) s.delete(key); else s.add(key)
+    s.add(`${i % g.width},${Math.floor(i / g.width)}`)
   }
   markedCells.value = new Set(s)
 }
-/** In rect highlight mode: toggle all cells within the current highlight rect. */
-function toggleMarkRect() {
+function unmarkCode(code: string) {
+  if (!code) return
+  const g = grid.value; if (!g) return
+  const s = markedCells.value
+  for (let i = 0; i < g.cells.length; i++) {
+    if (g.cells[i] !== code) continue
+    s.delete(`${i % g.width},${Math.floor(i / g.width)}`)
+  }
+  markedCells.value = new Set(s)
+}
+/** Mark all non-empty cells within the current highlight rect. */
+function markRect() {
   const g = grid.value; if (!g) return
   const r = highlightRect.value
-  let anyMarked = false
-  for (let y = r.y; y < r.y + r.h && y < g.height; y++) {
-    for (let x = r.x; x < r.x + r.w && x < g.width; x++) {
-      if (g.cells[y * g.width + x] && markedCells.value.has(`${x},${y}`)) { anyMarked = true; break }
-    }
-    if (anyMarked) break
-  }
   const s = markedCells.value
   for (let y = r.y; y < r.y + r.h && y < g.height; y++) {
     for (let x = r.x; x < r.x + r.w && x < g.width; x++) {
       if (!g.cells[y * g.width + x]) continue
-      const key = `${x},${y}`
-      if (anyMarked) s.delete(key); else s.add(key)
+      s.add(`${x},${y}`)
     }
   }
   markedCells.value = new Set(s)
+}
+function unmarkRect() {
+  const g = grid.value; if (!g) return
+  const r = highlightRect.value
+  const s = markedCells.value
+  for (let y = r.y; y < r.y + r.h && y < g.height; y++) {
+    for (let x = r.x; x < r.x + r.w && x < g.width; x++) {
+      if (!g.cells[y * g.width + x]) continue
+      s.delete(`${x},${y}`)
+    }
+  }
+  markedCells.value = new Set(s)
+}
+function doMark(m: string) {
+  if (m === 'row') markRow(highlightRow.value)
+  else if (m === 'col') markCol(highlightCol.value)
+  else if (m === 'color') markCode(currentCode.value)
+  else if (m === 'rect') markRect()
+}
+function doUnmark(m: string) {
+  if (m === 'row') unmarkRow(highlightRow.value)
+  else if (m === 'col') unmarkCol(highlightCol.value)
+  else if (m === 'color') unmarkCode(currentCode.value)
+  else if (m === 'rect') unmarkRect()
 }
 
 /** Pure canvas mode — chrome (toolbars, palette, ruler chrome) hidden so the
@@ -3126,13 +3158,15 @@ function onDown(e: MouseEvent) {
   if (isShapeTool(tool.value)) { shapeOnDown(e); return }
   const cell = cellAt(e)
   if (cell) {
-    // In highlight mode, clicking toggles the current mode's subject
+    // In highlight mode, clicking a non-empty cell toggles that cell's mark
     if (highlightMode.value !== 'none') {
-      const m = highlightMode.value
-      if (m === 'row') toggleMarkRow(highlightRow.value)
-      else if (m === 'col') toggleMarkCol(highlightCol.value)
-      else if (m === 'color') toggleMarkCode(currentCode.value)
-      else if (m === 'rect') toggleMarkRect()
+      const g = grid.value
+      if (g && g.cells[cell.y * g.width + cell.x]) {
+        const key = `${cell.x},${cell.y}`
+        const s = markedCells.value
+        if (s.has(key)) s.delete(key); else s.add(key)
+        markedCells.value = new Set(s)
+      }
       return
     }
     // snapshot once per action so Ctrl+Z reverts the whole stroke
@@ -5249,6 +5283,9 @@ watch(grid, () => { clearSelection(); render() })
 .im-mark-btn:hover { border-color: #22c55e; color: #16a34a; }
 .im-mark-btn.on { background: linear-gradient(180deg, #dcfce7, #bbf7d0); border-color: #22c55e; border-style: solid; color: #15803d; box-shadow: 0 0 0 3px rgba(34,197,94,0.15); }
 /** Clear-all mark badge in immersive chip */
+.im-mark-group { display: inline-flex; gap: 3px; }
+.im-mark-btn.im-unmark { border-color: rgba(239,68,68,0.5) !important; color: #ef4444 !important; }
+.im-mark-btn.im-unmark:hover { border-color: #ef4444 !important; background: #fee2e2 !important; }
 .im-mark-badge {
   background: linear-gradient(180deg, #fee2e2, #fecaca) !important;
   border-color: #ef4444 !important; color: #dc2626 !important; cursor: pointer !important;
