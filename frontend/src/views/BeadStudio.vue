@@ -198,6 +198,10 @@
                   @mousedown.stop @click.stop />
            <span class="im-tag im-tag-pos mono">@({{ highlightRect.x + 1 }},{{ highlightRect.y + 1 }})</span>
          </span>
+         <button v-if="highlightMode === 'row'" class="im-mark-btn" title="点击标记/取消本行" @click.stop="toggleMarkRow(highlightRow)">🏷</button>
+         <button v-if="highlightMode === 'col'" class="im-mark-btn" title="点击标记/取消本列" @click.stop="toggleMarkCol(highlightCol)">🏷</button>
+         <button v-if="highlightMode === 'color'" class="im-mark-btn" title="点击标记/取消本色的所有格子" @click.stop="toggleMarkCode(currentCode)">🏷</button>
+         <button v-if="highlightMode === 'rect'" class="im-mark-btn" title="点击标记/取消矩形区域" @click.stop="toggleMarkRect()">🏷</button>
          <span v-if="markedCount > 0" class="im-tag im-mark-badge" title="清除所有标记" @click.stop="clearAllMarked">✕{{ markedCount }}</span>
 
          <span class="im-hint">Esc 退出</span>
@@ -1214,14 +1218,69 @@ function saveMarkedState() {
   } catch {}
 }
 watch(markedCells, () => { saveMarkedState(); render() }, { deep: true })
-function toggleMarkCell(x: number, y: number) {
-  const key = `${x},${y}`
-  const s = markedCells.value
-  if (s.has(key)) s.delete(key); else s.add(key)
-  markedCells.value = new Set(s)
-}
 function clearAllMarked() {
   markedCells.value = new Set()
+}
+/** In row highlight mode: toggle all cells in the given row. */
+function toggleMarkRow(rowIdx: number) {
+  const g = grid.value; if (!g) return
+  let anyMarked = false
+  for (let x = 0; x < g.width; x++) { if (markedCells.value.has(`${x},${rowIdx}`)) { anyMarked = true; break } }
+  const s = markedCells.value
+  for (let x = 0; x < g.width; x++) {
+    const key = `${x},${rowIdx}`
+    if (anyMarked) s.delete(key); else s.add(key)
+  }
+  markedCells.value = new Set(s)
+}
+/** In col highlight mode: toggle all cells in the given column. */
+function toggleMarkCol(colIdx: number) {
+  const g = grid.value; if (!g) return
+  let anyMarked = false
+  for (let y = 0; y < g.height; y++) { if (markedCells.value.has(`${colIdx},${y}`)) { anyMarked = true; break } }
+  const s = markedCells.value
+  for (let y = 0; y < g.height; y++) {
+    const key = `${colIdx},${y}`
+    if (anyMarked) s.delete(key); else s.add(key)
+  }
+  markedCells.value = new Set(s)
+}
+/** In color highlight mode: toggle all cells matching the given color code. */
+function toggleMarkCode(code: string) {
+  const g = grid.value; if (!g) return
+  let anyMarked = false
+  for (let i = 0; i < g.cells.length; i++) {
+    if (g.cells[i] !== code) continue
+    const x = i % g.width, y = Math.floor(i / g.width)
+    if (markedCells.value.has(`${x},${y}`)) { anyMarked = true; break }
+  }
+  const s = markedCells.value
+  for (let i = 0; i < g.cells.length; i++) {
+    if (g.cells[i] !== code) continue
+    const key = `${i % g.width},${Math.floor(i / g.width)}`
+    if (anyMarked) s.delete(key); else s.add(key)
+  }
+  markedCells.value = new Set(s)
+}
+/** In rect highlight mode: toggle all cells within the current highlight rect. */
+function toggleMarkRect() {
+  const g = grid.value; if (!g) return
+  const r = highlightRect.value
+  let anyMarked = false
+  for (let y = r.y; y < r.y + r.h && y < g.height; y++) {
+    for (let x = r.x; x < r.x + r.w && x < g.width; x++) {
+      if (markedCells.value.has(`${x},${y}`)) { anyMarked = true; break }
+    }
+    if (anyMarked) break
+  }
+  const s = markedCells.value
+  for (let y = r.y; y < r.y + r.h && y < g.height; y++) {
+    for (let x = r.x; x < r.x + r.w && x < g.width; x++) {
+      const key = `${x},${y}`
+      if (anyMarked) s.delete(key); else s.add(key)
+    }
+  }
+  markedCells.value = new Set(s)
 }
 
 /** Pure canvas mode — chrome (toolbars, palette, ruler chrome) hidden so the
@@ -3033,9 +3092,13 @@ function onDown(e: MouseEvent) {
   if (isShapeTool(tool.value)) { shapeOnDown(e); return }
   const cell = cellAt(e)
   if (cell) {
-    // In highlight mode, clicking a cell toggles its mark (brightening)
+    // In highlight mode, clicking toggles the current mode's subject
     if (highlightMode.value !== 'none') {
-      toggleMarkCell(cell.x, cell.y)
+      const m = highlightMode.value
+      if (m === 'row') toggleMarkRow(highlightRow.value)
+      else if (m === 'col') toggleMarkCol(highlightCol.value)
+      else if (m === 'color') toggleMarkCode(currentCode.value)
+      else if (m === 'rect') toggleMarkRect()
       return
     }
     // snapshot once per action so Ctrl+Z reverts the whole stroke
