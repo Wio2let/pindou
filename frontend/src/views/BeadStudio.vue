@@ -561,12 +561,6 @@
           <div v-if="hoverTip && !transforming" class="hover-tip" :style="hoverTipStyle">
             {{ hoverTip }}
           </div>
-          <transition name="fs-tip">
-            <div v-if="showFsTip" class="fs-tip">
-              <span class="fs-tip-key">F</span>
-              <span class="fs-tip-text">键可全屏画布</span>
-            </div>
-          </transition>
           <!-- free-transform action bar -->
           <div v-if="transforming" class="xform-bar">
             <span class="xform-title">自由变换</span>
@@ -1443,7 +1437,6 @@ const offset = ref({ x: 28, y: 28 })
 const hover = ref<{ x: number; y: number } | null>(null)
 const fullscreen = ref(false)   // canvas fills the whole viewport
 // "press F for fullscreen" hint — shown whenever a canvas is open and we're not already fullscreen
-const showFsTip = computed(() => !!grid.value && !fullscreen.value)
 
 // cursor heart trail — shared composable; keep the canvas wrap heart-free
 useHeartTrail({ skipWhenInside: () => wrapRef.value })
@@ -5142,47 +5135,6 @@ watch(grid, () => { clearSelection(); render() })
 }
 .my-pal-chip:hover .chip-x { opacity: 0.85; }
 
-/* "press F for fullscreen" tip — top-right of canvas */
-.fs-tip {
-  position: absolute;
-  top: 12px;
-  right: 14px;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.45rem 0.8rem 0.45rem 0.55rem;
-  background: linear-gradient(135deg, #fff 0%, var(--cream-2) 100%);
-  border: 2px solid var(--sakura);
-  border-radius: 999px;
-  box-shadow: 0 4px 14px rgba(255, 107, 157, 0.25);
-  font-family: var(--font-body);
-  font-weight: 700;
-  font-size: 0.78rem;
-  color: var(--plum-1);
-  pointer-events: none;
-  z-index: 20;
-}
-.fs-tip-key {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 1.4rem;
-  height: 1.4rem;
-  padding: 0 0.4rem;
-  background: var(--sakura);
-  color: #fff;
-  border-radius: 6px;
-  font-family: var(--font-mono);
-  font-weight: 800;
-  font-size: 0.8rem;
-  box-shadow: 0 2px 0 #d75d8a;
-}
-.fs-tip-text { white-space: nowrap; }
-.fs-tip-enter-active, .fs-tip-leave-active {
-  transition: opacity 0.3s ease, transform 0.3s ease;
-}
-.fs-tip-enter-from { opacity: 0; transform: translateY(-6px) scale(0.92); }
-.fs-tip-leave-to   { opacity: 0; transform: translateY(-4px) scale(0.96); }
 
 /* ===== pan D-pad ===== */
 .pan-dpad {
