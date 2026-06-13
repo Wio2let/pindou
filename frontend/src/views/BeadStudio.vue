@@ -3344,7 +3344,11 @@ function drawGridLayer(
  * Dim every cell not in the highlighted row / column / colour band by
  * painting a translucent black rectangle over it, then draw a bright outline
  * around the lit area so the focus is unmistakable.
+ * Marked cells are skipped (kept at original brightness) — no fill/stroke overlay.
  */
+function isMarked(x: number, y: number): boolean {
+  return markedCells.value.has(`${x},${y}`)
+}
 function drawHighlightOverlay(
   ctx: CanvasRenderingContext2D, cell: number, ox: number, oy: number,
 ) {
@@ -3356,72 +3360,63 @@ function drawHighlightOverlay(
   ctx.fillStyle = dim
   if (highlightMode.value === 'row') {
     const r = Math.max(0, Math.min(g.height - 1, highlightRow.value))
-    // dim above and below the highlighted row
-    if (r > 0) ctx.fillRect(ox, oy, W, r * cell)
-    if (r < g.height - 1) ctx.fillRect(ox, oy + (r + 1) * cell, W, (g.height - r - 1) * cell)
+    // dim above and below, per-cell skipping marked ones
+    for (let y = 0; y < g.height; y++) {
+      if (y === r) continue
+      for (let x = 0; x < g.width; x++) {
+        if (isMarked(x, y)) continue
+        ctx.fillRect(ox + x * cell, oy + y * cell, cell, cell)
+      }
+    }
     // bright outline on the row
     ctx.strokeStyle = '#ffd76b'
     ctx.lineWidth = 2
     ctx.strokeRect(ox + 0.5, oy + r * cell + 0.5, W - 1, cell - 1)
   } else if (highlightMode.value === 'col') {
     const c = Math.max(0, Math.min(g.width - 1, highlightCol.value))
-    if (c > 0) ctx.fillRect(ox, oy, c * cell, H)
-    if (c < g.width - 1) ctx.fillRect(ox + (c + 1) * cell, oy, (g.width - c - 1) * cell, H)
+    for (let x = 0; x < g.width; x++) {
+      if (x === c) continue
+      for (let y = 0; y < g.height; y++) {
+        if (isMarked(x, y)) continue
+        ctx.fillRect(ox + x * cell, oy + y * cell, cell, cell)
+      }
+    }
     ctx.strokeStyle = '#ffd76b'
     ctx.lineWidth = 2
     ctx.strokeRect(ox + c * cell + 0.5, oy + 0.5, cell - 1, H - 1)
   } else if (highlightMode.value === 'rect') {
     clampHighlightRect()
     const r = highlightRect.value
-    // dim the four bands around the rect
-    if (r.y > 0)                 ctx.fillRect(ox, oy, W, r.y * cell)
-    if (r.y + r.h < g.height)    ctx.fillRect(ox, oy + (r.y + r.h) * cell, W, (g.height - r.y - r.h) * cell)
-    if (r.x > 0)                 ctx.fillRect(ox, oy + r.y * cell, r.x * cell, r.h * cell)
-    if (r.x + r.w < g.width)     ctx.fillRect(ox + (r.x + r.w) * cell, oy + r.y * cell, (g.width - r.x - r.w) * cell, r.h * cell)
-    // bright outline on the rect
+    for (let y = 0; y < g.height; y++) {
+      for (let x = 0; x < g.width; x++) {
+        // inside the rect → skip dimming
+        if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) continue
+        if (isMarked(x, y)) continue
+        ctx.fillRect(ox + x * cell, oy + y * cell, cell, cell)
+      }
+    }
     ctx.strokeStyle = '#ffd76b'
     ctx.lineWidth = 2
     ctx.strokeRect(ox + r.x * cell + 0.5, oy + r.y * cell + 0.5, r.w * cell - 1, r.h * cell - 1)
   } else if (highlightMode.value === 'color') {
     const target = currentCode.value
     if (!target) {
-      // no colour picked — dim everything as a hint
-      ctx.fillRect(ox, oy, W, H)
+      // no colour picked — dim everything, skip marked cells
+      for (let y = 0; y < g.height; y++) {
+        for (let x = 0; x < g.width; x++) {
+          if (isMarked(x, y)) continue
+          ctx.fillRect(ox + x * cell, oy + y * cell, cell, cell)
+        }
+      }
     } else {
-      // dim all non-matching cells; leave matching cells bright
       for (let y = 0; y < g.height; y++) {
         for (let x = 0; x < g.width; x++) {
-          if (g.cells[y * g.width + x] !== target) {
-            ctx.fillRect(ox + x * cell, oy + y * cell, cell, cell)
-          }
-        }
-      }
-      // draw a bright outline around each matching cell
-      ctx.strokeStyle = '#ffd76b'
-      ctx.lineWidth = Math.max(1.5, cell * 0.06)
-      for (let y = 0; y < g.height; y++) {
-        for (let x = 0; x < g.width; x++) {
-          if (g.cells[y * g.width + x] === target) {
-            ctx.strokeRect(ox + x * cell + 1, oy + y * cell + 1, cell - 2, cell - 2)
-          }
+          if (g.cells[y * g.width + x] === target) continue
+          if (isMarked(x, y)) continue
+          ctx.fillRect(ox + x * cell, oy + y * cell, cell, cell)
         }
       }
     }
-  }
-  // ---- brightening overlay for per-cell marks ----
-  if (markedCells.value.size > 0) {
-    ctx.save()
-    ctx.fillStyle = 'rgba(255, 255, 220, 0.38)'
-    ctx.strokeStyle = 'rgba(255, 215, 0, 0.45)'
-    ctx.lineWidth = Math.max(1.5, cell * 0.05)
-    for (const key of markedCells.value) {
-      const parts = key.split(',')
-      const mx = parseInt(parts[0], 10), my = parseInt(parts[1], 10)
-      if (mx < 0 || mx >= g.width || my < 0 || my >= g.height) continue
-      ctx.fillRect(ox + mx * cell, oy + my * cell, cell, cell)
-      ctx.strokeRect(ox + mx * cell + 1, oy + my * cell + 1, cell - 2, cell - 2)
-    }
-    ctx.restore()
   }
   ctx.restore()
 }
