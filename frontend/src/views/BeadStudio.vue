@@ -198,9 +198,7 @@
                   @mousedown.stop @click.stop />
            <span class="im-tag im-tag-pos mono">@({{ highlightRect.x + 1 }},{{ highlightRect.y + 1 }})</span>
          </span>
-         <button v-if="highlightMode === 'row'" class="im-mark-btn" :class="{ on: markedRows.has(highlightRow) }" :title="markedRows.has(highlightRow)?'取消标记':'标记此行'" @click.stop="toggleMarkRow(highlightRow)">{{ markedRows.has(highlightRow)?'🔖':'🏷' }}</button>
-         <button v-if="highlightMode === 'col'" class="im-mark-btn" :class="{ on: markedCols.has(highlightCol) }" :title="markedCols.has(highlightCol)?'取消标记':'标记此列'" @click.stop="toggleMarkCol(highlightCol)">{{ markedCols.has(highlightCol)?'🔖':'🏷' }}</button>
-         <button v-if="highlightMode === 'rect'" class="im-mark-btn" :class="{ on: isCurrentRectMarked }" title="标记/取消" @click.stop="toggleMarkRect()">🏷</button>
+         <span v-if="markedCount > 0" class="im-tag im-mark-badge" title="清除所有标记" @click.stop="clearAllMarked">✕{{ markedCount }}</span>
 
          <span class="im-hint">Esc 退出</span>
        </div>
@@ -1194,24 +1192,16 @@ const highlightRect = ref<{ x: number; y: number; w: number; h: number }>({
 })
 const showHighlightMenu = ref(false)
 
-// ---- persistent marked items (green highlight that survives mode switches) ----
-const markedRows = ref(new Set<number>())
-const markedCols = ref(new Set<number>())
-const markedCodes = ref(new Set<string>())
-const markedRects = ref<{ x: number; y: number; w: number; h: number }[]>([])
-const MARKED_STORAGE_KEY = 'bead-marked-items-v1'
-const markedCount = computed(() =>
-  markedRows.value.size + markedCols.value.size + markedCodes.value.size + markedRects.value.length,
-)
+// ---- persistent per-cell marks (bright overlay, survives mode switches) ----
+const markedCells = ref(new Set<string>())
+const MARKED_STORAGE_KEY = 'bead-marked-cells-v2'
+const markedCount = computed(() => markedCells.value.size)
 function loadMarkedState() {
   try {
     const raw = localStorage.getItem(MARKED_STORAGE_KEY)
     if (raw) {
       const v = JSON.parse(raw)
-      if (v?.rows) markedRows.value = new Set(v.rows)
-      if (v?.cols) markedCols.value = new Set(v.cols)
-      if (v?.codes) markedCodes.value = new Set(v.codes)
-      if (v?.rects) markedRects.value = v.rects
+      if (Array.isArray(v?.cells)) markedCells.value = new Set(v.cells)
     }
   } catch {/* malformed */}
 }
@@ -1219,46 +1209,19 @@ loadMarkedState()
 function saveMarkedState() {
   try {
     localStorage.setItem(MARKED_STORAGE_KEY, JSON.stringify({
-      rows: [...markedRows.value],
-      cols: [...markedCols.value],
-      codes: [...markedCodes.value],
-      rects: markedRects.value,
+      cells: [...markedCells.value],
     }))
   } catch {}
 }
-watch([markedRows, markedCols, markedCodes, markedRects], () => { saveMarkedState(); render() }, { deep: true })
-function toggleMarkRow(idx: number) {
-  const s = markedRows.value
-  if (s.has(idx)) s.delete(idx); else s.add(idx)
-  markedRows.value = new Set(s)
-}
-function toggleMarkCol(idx: number) {
-  const s = markedCols.value
-  if (s.has(idx)) s.delete(idx); else s.add(idx)
-  markedCols.value = new Set(s)
-}
-function toggleMarkCode(code: string) {
-  const s = markedCodes.value
-  if (s.has(code)) s.delete(code); else s.add(code)
-  markedCodes.value = new Set(s)
-}
-function toggleMarkRect() {
-  const r = highlightRect.value
-  const idx = markedRects.value.findIndex(
-    mr => mr.x === r.x && mr.y === r.y && mr.w === r.w && mr.h === r.h,
-  )
-  if (idx >= 0) markedRects.value = [...markedRects.value.slice(0, idx), ...markedRects.value.slice(idx + 1)]
-  else markedRects.value = [...markedRects.value, { ...r }]
+watch(markedCells, () => { saveMarkedState(); render() }, { deep: true })
+function toggleMarkCell(x: number, y: number) {
+  const key = `${x},${y}`
+  const s = markedCells.value
+  if (s.has(key)) s.delete(key); else s.add(key)
+  markedCells.value = new Set(s)
 }
 function clearAllMarked() {
-  markedRows.value = new Set()
-  markedCols.value = new Set()
-  markedCodes.value = new Set()
-  markedRects.value = []
-}
-function isCurrentRectMarked(): boolean {
-  const r = highlightRect.value
-  return markedRects.value.some(mr => mr.x === r.x && mr.y === r.y && mr.w === r.w && mr.h === r.h)
+  markedCells.value = new Set()
 }
 
 /** Pure canvas mode — chrome (toolbars, palette, ruler chrome) hidden so the
@@ -3070,6 +3033,11 @@ function onDown(e: MouseEvent) {
   if (isShapeTool(tool.value)) { shapeOnDown(e); return }
   const cell = cellAt(e)
   if (cell) {
+    // In highlight mode, clicking a cell toggles its mark (brightening)
+    if (highlightMode.value !== 'none') {
+      toggleMarkCell(cell.x, cell.y)
+      return
+    }
     // snapshot once per action so Ctrl+Z reverts the whole stroke
     // (mirror does its own pushHistory inside mirrorCopy)
     if (['paint', 'erase', 'wand', 'wanderase', 'replace'].includes(tool.value)) pushHistory()
@@ -3377,37 +3345,20 @@ function drawHighlightOverlay(
       }
     }
   }
-  // ---- persistent green marks ----
-  ctx.strokeStyle = '#3cb371'
-  ctx.lineWidth = Math.max(2, cell * 0.08)
-  // marked rows
-  for (const r of markedRows.value) {
-    if (r < 0 || r >= g.height) continue
-    ctx.strokeRect(ox + 1, oy + r * cell + 1, W - 2, cell - 2)
-  }
-  // marked cols
-  for (const c of markedCols.value) {
-    if (c < 0 || c >= g.width) continue
-    ctx.strokeRect(ox + c * cell + 1, oy + 1, cell - 2, H - 2)
-  }
-  // marked codes
-  const target = currentCode.value
-  for (const code of markedCodes.value) {
-    for (let y = 0; y < g.height; y++) {
-      for (let x = 0; x < g.width; x++) {
-        if (g.cells[y * g.width + x] === code) {
-          ctx.strokeRect(ox + x * cell + 2, oy + y * cell + 2, cell - 4, cell - 4)
-        }
-      }
+  // ---- brightening overlay for per-cell marks ----
+  if (markedCells.value.size > 0) {
+    ctx.save()
+    ctx.fillStyle = 'rgba(255, 255, 220, 0.38)'
+    ctx.strokeStyle = 'rgba(255, 215, 0, 0.45)'
+    ctx.lineWidth = Math.max(1.5, cell * 0.05)
+    for (const key of markedCells.value) {
+      const parts = key.split(',')
+      const mx = parseInt(parts[0], 10), my = parseInt(parts[1], 10)
+      if (mx < 0 || mx >= g.width || my < 0 || my >= g.height) continue
+      ctx.fillRect(ox + mx * cell, oy + my * cell, cell, cell)
+      ctx.strokeRect(ox + mx * cell + 1, oy + my * cell + 1, cell - 2, cell - 2)
     }
-  }
-  // marked rects
-  ctx.fillStyle = 'rgba(60,179,113,0.12)'
-  for (const mr of markedRects.value) {
-    const rx = ox + mr.x * cell, ry = oy + mr.y * cell
-    const rw = mr.w * cell, rh = mr.h * cell
-    ctx.fillRect(rx, ry, rw, rh)
-    ctx.strokeRect(rx + 1, ry + 1, rw - 2, rh - 2)
+    ctx.restore()
   }
   ctx.restore()
 }
@@ -5129,6 +5080,14 @@ watch(grid, () => { clearSelection(); render() })
 }
 .im-mark-btn:hover { border-color: #22c55e; color: #16a34a; }
 .im-mark-btn.on { background: linear-gradient(180deg, #dcfce7, #bbf7d0); border-color: #22c55e; border-style: solid; color: #15803d; box-shadow: 0 0 0 3px rgba(34,197,94,0.15); }
+/** Clear-all mark badge in immersive chip */
+.im-mark-badge {
+  background: linear-gradient(180deg, #fee2e2, #fecaca) !important;
+  border-color: #ef4444 !important; color: #dc2626 !important; cursor: pointer !important;
+}
+.im-mark-badge:hover {
+  background: linear-gradient(180deg, #fecaca, #fca5a5) !important;
+}
 
 .hi-tag-marked {
   background: linear-gradient(180deg, #dcfce7, #bbf7d0) !important;
