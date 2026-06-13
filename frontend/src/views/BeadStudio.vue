@@ -557,7 +557,11 @@
              @touchmove="onTouchMove"
              @touchend="onTouchEnd">
           <canvas ref="canvasRef"></canvas>
-          <canvas v-if="immersive" ref="minimapRef" class="minimap"></canvas>
+          <canvas v-if="immersive" ref="minimapRef" class="minimap"
+                  @mousedown="minimapOnDown"
+                  @mousemove="minimapOnMove"
+                  @mouseup="minimapOnUp"
+                  @mouseleave="minimapOnUp"></canvas>
           <div v-if="hoverTip && !transforming" class="hover-tip" :style="hoverTipStyle">
             {{ hoverTip }}
           </div>
@@ -3383,6 +3387,53 @@ function drawMinimap(vx0: number, vy0: number, vx1: number, vy1: number) {
   }
 }
 
+// ---- minimap drag-to-zoom ----
+let minimapDragging = false
+let minimapStartY = 0
+let minimapStartZoom = 1
+let minimapStartOffset = { x: 0, y: 0 }
+let minimapAnchor: { x: number; y: number } | null = null
+function minimapOnDown(e: MouseEvent) {
+  const cv = minimapRef.value, g = grid.value
+  if (!cv || !g) return
+  const rect = cv.getBoundingClientRect()
+  const pad = 4
+  const aw = rect.width - pad * 2, ah = rect.height - pad * 2
+  const mmScale = Math.min(aw / g.width, ah / g.height)
+  const offX = pad + (aw - g.width * mmScale) / 2
+  const offY = pad + (ah - g.height * mmScale) / 2
+  const mx = e.clientX - rect.left, my = e.clientY - rect.top
+  const gx = Math.floor((mx - offX) / mmScale)
+  const gy = Math.floor((my - offY) / mmScale)
+  if (gx < 0 || gx >= g.width || gy < 0 || gy >= g.height) return
+  minimapDragging = true
+  minimapStartY = e.clientY
+  minimapStartZoom = zoom.value
+  minimapStartOffset = { ...offset.value }
+  minimapAnchor = { x: gx, y: gy }
+}
+function minimapOnMove(e: MouseEvent) {
+  if (!minimapDragging || !minimapAnchor) return
+  const g = grid.value, wrap = wrapRef.value
+  if (!g || !wrap) return
+  const dy = e.clientY - minimapStartY
+  const factor = Math.pow(2, dy / 60)
+  const newZoom = Math.max(0.15, Math.min(4, minimapStartZoom * factor))
+  const oldCell = BASE_CELL * minimapStartZoom
+  const newCell = BASE_CELL * newZoom
+  // Keep the anchor grid cell at the same screen position
+  const oldSx = RULER + minimapStartOffset.x + minimapAnchor.x * oldCell
+  const oldSy = RULER + minimapStartOffset.y + minimapAnchor.y * oldCell
+  const newOx = oldSx - RULER - minimapAnchor.x * newCell
+  const newOy = oldSy - RULER - minimapAnchor.y * newCell
+  zoom.value = newZoom
+  offset.value = { x: newOx, y: newOy }
+  render()
+}
+function minimapOnUp() {
+  if (minimapDragging) minimapDragging = false
+}
+
 /**
  * Draw one configurable grid layer: vertical + horizontal lines at every
  * `cfg.step` cells, in the given colour / width / dash pattern. No-op when
@@ -4766,10 +4817,11 @@ watch(grid, () => { clearSelection(); render() })
   border-radius: 8px;
   border: 2px solid rgba(255,255,255,0.7);
   box-shadow: 0 3px 14px rgba(0,0,0,0.2);
-  pointer-events: none;
+  cursor: grab;
   z-index: 10;
   background: #fdf6f0;
 }
+.minimap:active { cursor: grabbing; }
 .hover-tip {
   position: absolute;
   background: var(--plum-1);
