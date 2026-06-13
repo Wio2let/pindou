@@ -198,6 +198,9 @@
                   @mousedown.stop @click.stop />
            <span class="im-tag im-tag-pos mono">@({{ highlightRect.x + 1 }},{{ highlightRect.y + 1 }})</span>
          </span>
+         <button v-if="highlightMode === 'row'" class="im-mark-btn" :class="{ on: markedRows.has(highlightRow) }" :title="markedRows.has(highlightRow)?'取消标记':'标记此行'" @click.stop="toggleMarkRow(highlightRow)">{{ markedRows.has(highlightRow)?'🔖':'🏷' }}</button>
+         <button v-if="highlightMode === 'col'" class="im-mark-btn" :class="{ on: markedCols.has(highlightCol) }" :title="markedCols.has(highlightCol)?'取消标记':'标记此列'" @click.stop="toggleMarkCol(highlightCol)">{{ markedCols.has(highlightCol)?'🔖':'🏷' }}</button>
+         <button v-if="highlightMode === 'rect'" class="im-mark-btn" :class="{ on: isCurrentRectMarked }" title="标记/取消" @click.stop="toggleMarkRect()">🏷</button>
 
          <span class="im-hint">Esc 退出</span>
        </div>
@@ -225,6 +228,7 @@
             <b class="mono">{{ activeBrushSize }}×{{ activeBrushSize }}</b>
             <span class="size-hint">⇧滚轮</span>
           </div>
+          <div class="size-tag" v-show="tool === 'pan'" title="拖拽或方向键移动参考线">移动参考线 <span class="size-hint">拖拽·↑↓←→</span></div>
           <!-- mirror-copy config -->
           <div class="mirror-cfg" v-show="tool === 'mirror'">
             <button class="tool-btn mini-btn" :class="{ on: mirrorAxis === 'v' }"
@@ -337,6 +341,14 @@
                        :disabled="!gridConfig.dashed.enabled"
                        title="线宽 (px)" />
               </div>
+              <div class="gl-row">
+                <label class="gl-chk"><span class="gl-row-title">原点偏移</span></label>
+                <span class="gl-sub">X</span>
+                <input type="number" min="-400" max="400" class="gl-num" v-model.number="gridConfig.solid.offsetX" />
+                <span class="gl-sub">Y</span>
+                <input type="number" min="-400" max="400" class="gl-num" v-model.number="gridConfig.solid.offsetY" />
+                <span class="gl-sub">格</span>
+              </div>
               <div class="gl-foot">
                 <button class="btn btn-ghost btn-xs" @click="resetGridConfig">↺ 重置默认</button>
               </div>
@@ -381,6 +393,7 @@
                      class="hi-rect-num" @input="clampHighlightRect()" />
               <span class="hi-rect-pos mono">@({{ highlightRect.x + 1 }},{{ highlightRect.y + 1 }})</span>
             </span>
+            <span v-if="highlightMode !== 'none' && markedCount > 0" class="hi-tag hi-tag-marked mono" title="已标记 · 点击清除" @click.stop="clearAllMarked">✓{{ markedCount }}</span>
           </div>
           <div class="tool-divider"></div>
           <div class="tool-group">
@@ -397,7 +410,7 @@
           <span class="grid-size mono" title="按豆径换算的成品尺寸">
             ≈ {{ finishedSize }}
           </span>
-          <span class="kbd-hint" title="B 画笔 · E 橡皮 · G 魔棒画笔 · D 魔棒橡皮 · R 替换 · M 镜像复制 · S 选区 · I 取色 · H/空格 移动 · F 全屏 · ⇧+滚轮 笔刷大小 · +/- 缩放 · 0 适应 · Ctrl+Z 撤销 · 高亮模式下 ↑↓←→ 切换行列、Esc 退出">⌨ 快捷键</span>
+          <span class="kbd-hint" title="B 画笔 · E 橡皮 · G 魔棒画笔 · D 魔棒橡皮 · R 替换 · M 镜像复制 · S 选区 · I 取色 · H=移动参考线 · 空格 移动视图 · Z/⇧Z 缩放 · F 全屏 · ⇧+滚轮 笔刷大小 · +/- 缩放 · 0 适应 · Ctrl+Z 撤销 · 高亮模式下 ↑↓←→ 切换行列、Esc 退出">⌨ 快捷键</span>
           <label class="export-opt" style="margin-left:auto;" title="在画布每颗豆上显示 MARD 色号">
             <input type="checkbox" v-model="showLabels" />
             <span>标色号</span>
@@ -533,7 +546,10 @@
              @mouseup="onUp"
              @mouseleave="onLeave"
              @dragover.prevent
-             @drop.prevent="onDrop">
+             @drop.prevent="onDrop"
+             @touchstart="onTouchStart"
+             @touchmove="onTouchMove"
+             @touchend="onTouchEnd">
           <canvas ref="canvasRef"></canvas>
           <div v-if="hoverTip && !transforming" class="hover-tip" :style="hoverTipStyle">
             {{ hoverTip }}
@@ -551,6 +567,14 @@
             <span class="xform-hint">角手柄按 Shift 等比</span>
             <button class="btn btn-sm btn-primary" @click="applyTransform">✓ 应用</button>
             <button class="btn btn-sm btn-ghost" @click="cancelTransform">✕ 取消</button>
+          </div>
+          <!-- pan D-pad — moves grid-line origin -->
+          <div v-if="tool === 'pan' && !transforming" class="pan-dpad">
+            <button class="dpad-btn dpad-up"    title="参考线上移 (↑)" @mousedown.prevent="startNudge('up')"    @mouseup="stopNudge" @mouseleave="stopNudge">▲</button>
+            <button class="dpad-btn dpad-left"  title="参考线左移 (←)" @mousedown.prevent="startNudge('left')"  @mouseup="stopNudge" @mouseleave="stopNudge">◀</button>
+            <span class="dpad-center"><span class="dpad-label mono">↦{{ gridConfig.solid.offsetX }},{{ gridConfig.solid.offsetY }}</span></span>
+            <button class="dpad-btn dpad-right" title="参考线右移 (→)" @mousedown.prevent="startNudge('right')" @mouseup="stopNudge" @mouseleave="stopNudge">▶</button>
+            <button class="dpad-btn dpad-down"  title="参考线下移 (↓)" @mousedown.prevent="startNudge('down')"  @mouseup="stopNudge" @mouseleave="stopNudge">▼</button>
           </div>
         </div>
         </div>
@@ -852,8 +876,10 @@ interface GridLayer {
   step: number    // every N cells
   color: string   // CSS colour
   width: number   // line width in px
+  offsetX: number // shift origin
+  offsetY: number
 }
-const GRID_STORAGE_KEY = 'bead-grid-lines-v1'
+const GRID_STORAGE_KEY = 'bead-grid-lines-v2'
 function loadGridConfig(): { solid: GridLayer; dashed: GridLayer } {
   try {
     const raw = localStorage.getItem(GRID_STORAGE_KEY)
@@ -863,8 +889,8 @@ function loadGridConfig(): { solid: GridLayer; dashed: GridLayer } {
     }
   } catch { /* malformed — fall through */ }
   return {
-    solid:  { enabled: true, step: 10, color: '#e8462a', width: 1.6 },
-    dashed: { enabled: true, step: 5,  color: '#7c5cff', width: 1   },
+    solid:  { enabled: true, step: 10, color: '#e8462a', width: 1.6, offsetX: 0, offsetY: 0 },
+    dashed: { enabled: true, step: 5,  color: '#7c5cff', width: 1, offsetX: 0, offsetY: 0 },
   }
 }
 const gridConfig = ref(loadGridConfig())
@@ -892,9 +918,54 @@ function hexOf(c: string): string {
 }
 function resetGridConfig() {
   gridConfig.value = {
-    solid:  { enabled: true, step: 10, color: '#e8462a', width: 1.6 },
-    dashed: { enabled: true, step: 5,  color: '#7c5cff', width: 1   },
+    solid:  { enabled: true, step: 10, color: '#e8462a', width: 1.6, offsetX: 0, offsetY: 0 },
+    dashed: { enabled: true, step: 5,  color: '#7c5cff', width: 1, offsetX: 0, offsetY: 0 },
   }
+}
+const NUDGE_STEP = 1           // cells per nudge tick
+let nudgeTimer: number | null = null
+let nudgeDir = { x: 0, y: 0 }
+function startNudge(dir: 'up' | 'down' | 'left' | 'right') {
+  const map: Record<string,{x:number;y:number}> = { up: {x:0,y:-1}, down: {x:0,y:1}, left: {x:-1,y:0}, right: {x:1,y:0} }
+  nudgeDir = map[dir]
+  doNudge(nudgeDir.x, nudgeDir.y)
+  if (nudgeTimer == null) nudgeTimer = window.setTimeout(() => { doNudge(nudgeDir.x, nudgeDir.y); nudgeTimer = window.setInterval(() => doNudge(nudgeDir.x, nudgeDir.y), 60) }, 300)
+}
+function stopNudge() {
+  nudgeDir = { x: 0, y: 0 }
+  if (nudgeTimer != null) { clearInterval(nudgeTimer); clearTimeout(nudgeTimer); nudgeTimer = null }
+}
+function doNudge(dx: number, dy: number) {
+  if (!dx && !dy) return
+  const s = gridConfig.value.solid, d = gridConfig.value.dashed
+  s.offsetX = (s.offsetX || 0) + dx
+  s.offsetY = (s.offsetY || 0) + dy
+  d.offsetX = (d.offsetX || 0) + dx
+  d.offsetY = (d.offsetY || 0) + dy
+  gridConfig.value = { solid: { ...s }, dashed: { ...d } }
+}
+/** true while the user is dragging on the canvas in pan-grid mode */
+let panGridStart: { x: number; y: number; ox: number; oy: number } | null = null
+function panGridOnDown(e: MouseEvent) {
+  panGridStart = {
+    x: e.clientX, y: e.clientY,
+    ox: (gridConfig.value.solid.offsetX || 0),
+    oy: (gridConfig.value.solid.offsetY || 0),
+  }
+}
+function panGridOnMove(e: MouseEvent) {
+  if (!panGridStart) return
+  const dx = Math.round((e.clientX - panGridStart.x) / 4)
+  const dy = Math.round((e.clientY - panGridStart.y) / 4)
+  const s = gridConfig.value.solid, d = gridConfig.value.dashed
+  s.offsetX = panGridStart.ox + dx
+  s.offsetY = panGridStart.oy + dy
+  d.offsetX = panGridStart.ox + dx
+  d.offsetY = panGridStart.oy + dy
+  gridConfig.value = { solid: { ...s }, dashed: { ...d } }
+}
+function panGridOnUp() {
+  panGridStart = null
 }
 // close grid popover on click-outside
 watch(showGridMenu, (open) => {
@@ -1131,6 +1202,74 @@ const highlightRect = ref<{ x: number; y: number; w: number; h: number }>({
   x: 0, y: 0, w: 8, h: 8,
 })
 const showHighlightMenu = ref(false)
+
+// ---- persistent marked items (green highlight that survives mode switches) ----
+const markedRows = ref(new Set<number>())
+const markedCols = ref(new Set<number>())
+const markedCodes = ref(new Set<string>())
+const markedRects = ref<{ x: number; y: number; w: number; h: number }[]>([])
+const MARKED_STORAGE_KEY = 'bead-marked-items-v1'
+const markedCount = computed(() =>
+  markedRows.value.size + markedCols.value.size + markedCodes.value.size + markedRects.value.length,
+)
+function loadMarkedState() {
+  try {
+    const raw = localStorage.getItem(MARKED_STORAGE_KEY)
+    if (raw) {
+      const v = JSON.parse(raw)
+      if (v?.rows) markedRows.value = new Set(v.rows)
+      if (v?.cols) markedCols.value = new Set(v.cols)
+      if (v?.codes) markedCodes.value = new Set(v.codes)
+      if (v?.rects) markedRects.value = v.rects
+    }
+  } catch {/* malformed */}
+}
+loadMarkedState()
+function saveMarkedState() {
+  try {
+    localStorage.setItem(MARKED_STORAGE_KEY, JSON.stringify({
+      rows: [...markedRows.value],
+      cols: [...markedCols.value],
+      codes: [...markedCodes.value],
+      rects: markedRects.value,
+    }))
+  } catch {}
+}
+watch([markedRows, markedCols, markedCodes, markedRects], () => { saveMarkedState(); render() }, { deep: true })
+function toggleMarkRow(idx: number) {
+  const s = markedRows.value
+  if (s.has(idx)) s.delete(idx); else s.add(idx)
+  markedRows.value = new Set(s)
+}
+function toggleMarkCol(idx: number) {
+  const s = markedCols.value
+  if (s.has(idx)) s.delete(idx); else s.add(idx)
+  markedCols.value = new Set(s)
+}
+function toggleMarkCode(code: string) {
+  const s = markedCodes.value
+  if (s.has(code)) s.delete(code); else s.add(code)
+  markedCodes.value = new Set(s)
+}
+function toggleMarkRect() {
+  const r = highlightRect.value
+  const idx = markedRects.value.findIndex(
+    mr => mr.x === r.x && mr.y === r.y && mr.w === r.w && mr.h === r.h,
+  )
+  if (idx >= 0) markedRects.value = [...markedRects.value.slice(0, idx), ...markedRects.value.slice(idx + 1)]
+  else markedRects.value = [...markedRects.value, { ...r }]
+}
+function clearAllMarked() {
+  markedRows.value = new Set()
+  markedCols.value = new Set()
+  markedCodes.value = new Set()
+  markedRects.value = []
+}
+function isCurrentRectMarked(): boolean {
+  const r = highlightRect.value
+  return markedRects.value.some(mr => mr.x === r.x && mr.y === r.y && mr.w === r.w && mr.h === r.h)
+}
+
 /** Pure canvas mode — chrome (toolbars, palette, ruler chrome) hidden so the
  *  grid + dim overlay fill the entire viewport. Active whenever any highlight
  *  mode is on, since the toolbar status chip is hidden too. */
@@ -1335,7 +1474,7 @@ const tools: { id: Tool; svg: string; label: string; key: string }[] = [
   { id: 'pick', label: '取色', key: 'I', svg:
     '<rect x="14" y="2.6" width="7.2" height="7.2" rx="2.2" transform="rotate(45 17.6 6.2)" fill="currentColor" stroke="none"/>' +
     '<path d="M15.6 8.4 3.6 20.4" stroke-width="2.6"/>' },
-  { id: 'pan', label: '移动', key: 'H', svg:
+  { id: 'pan', label: '移动参考线', key: 'H', svg:
     '<path d="M18 11V6a2 2 0 0 0-4 0"/>' +
     '<path d="M14 10V4a2 2 0 0 0-4 0v2"/>' +
     '<path d="M10 10.5V6a2 2 0 0 0-4 0v8"/>' +
@@ -1897,6 +2036,87 @@ function zoomAt(cx: number, cy: number, factor: number) {
   }
   render()
 }
+// ---- touch support ----
+let touchState: {
+  fingers: number
+  startDist: number
+  startZoom: number
+  lastCenter: { x: number; y: number } | null
+  panFinger: number | null
+} = { fingers: 0, startDist: 0, startZoom: 1, lastCenter: null, panFinger: null }
+
+function cellAtTouch(t: Touch): { x: number; y: number } | null {
+  const g = grid.value, wrap = wrapRef.value
+  if (!g || !wrap) return null
+  const rect = wrap.getBoundingClientRect()
+  const cell = BASE_CELL * zoom.value
+  const x = Math.floor((t.clientX - rect.left - RULER - offset.value.x) / cell)
+  const y = Math.floor((t.clientY - rect.top - RULER - offset.value.y) / cell)
+  if (x < 0 || y < 0 || x >= g.width || y >= g.height) return null
+  return { x, y }
+}
+
+function onTouchStart(e: TouchEvent) {
+  if (e.touches.length === 2) {
+    // 2 fingers = pan grid lines; Shift+2 fingers = pinch zoom
+    if (e.shiftKey) {
+      const dx = e.touches[0].clientX - e.touches[1].clientX
+      const dy = e.touches[0].clientY - e.touches[1].clientY
+      touchState.fingers = 2
+      touchState.startDist = Math.hypot(dx, dy)
+      touchState.startZoom = zoom.value
+      touchState.lastCenter = {
+        x: (e.touches[0].clientX + e.touches[1].clientX) / 2,
+        y: (e.touches[0].clientY + e.touches[1].clientY) / 2,
+      }
+    } else {
+      touchState.fingers = 2
+      panGridOnDown(e.touches[0] as unknown as MouseEvent)
+    }
+    e.preventDefault()
+    return
+  }
+  // single finger: simulate mouse down
+  touchState.fingers = 1
+  onDown(e.touches[0] as unknown as MouseEvent)
+}
+
+function onTouchMove(e: TouchEvent) {
+  if (touchState.fingers === 2) {
+    if (e.shiftKey) {
+      // pinch zoom
+      const dx = e.touches[0].clientX - e.touches[1].clientX
+      const dy = e.touches[0].clientY - e.touches[1].clientY
+      const dist = Math.hypot(dx, dy)
+      if (touchState.startDist > 0) {
+        const wrap = wrapRef.value
+        if (wrap && touchState.lastCenter) {
+          const rect = wrap.getBoundingClientRect()
+          zoomAt(touchState.lastCenter.x - rect.left, touchState.lastCenter.y - rect.top, dist / touchState.startDist)
+        }
+      }
+    } else {
+      panGridOnMove(e.touches[0] as unknown as MouseEvent)
+    }
+    e.preventDefault()
+    return
+  }
+  if (touchState.fingers === 1) {
+    onMove(e.touches[0] as unknown as MouseEvent)
+  }
+}
+
+function onTouchEnd(e: TouchEvent) {
+  if (touchState.fingers === 2 && !e.shiftKey) {
+    panGridOnUp()
+  } else if (touchState.fingers === 1) {
+    onUp(e.changedTouches[0] as unknown as MouseEvent)
+  }
+  touchState.fingers = 0
+  touchState.startDist = 0
+  touchState.lastCenter = null
+}
+
 function onWheel(e: WheelEvent) {
   const d = e.deltaY !== 0 ? e.deltaY : e.deltaX
   // Shift + wheel adjusts brush / eraser size
@@ -2837,7 +3057,8 @@ function shapeOnUp(e: MouseEvent) {
 
 function onDown(e: MouseEvent) {
   if (transforming.value) { transformOnDown(e); return }
-  if (tool.value === 'pan' || e.button === 1) {
+  if (tool.value === 'pan') { panGridOnDown(e); return }
+  if (e.button === 1) {
     panning = true
     panStart = { x: e.clientX, y: e.clientY, ox: offset.value.x, oy: offset.value.y }
     return
@@ -2855,6 +3076,7 @@ function onDown(e: MouseEvent) {
 }
 function onMove(e: MouseEvent) {
   if (transforming.value) { if (xDrag) transformOnMove(e); return }
+  if (panGridStart) { panGridOnMove(e); return }
   if (panning) {
     offset.value = {
       x: panStart.ox + (e.clientX - panStart.x),
@@ -2882,12 +3104,14 @@ function onMove(e: MouseEvent) {
 }
 function onUp(e: MouseEvent) {
   if (transforming.value) { xDrag = null; return }
+  if (panGridStart) { panGridOnUp(); return }
   if (selMode !== 'none') { finishSelDrag(); return }
   if (shapeDragging) { shapeOnUp(e); return }
   painting = false; panning = false
 }
 function onLeave(e: MouseEvent) {
   if (transforming.value) { xDrag = null; return }
+  if (panGridStart) { panGridOnUp(); return }
   if (selMode !== 'none') { finishSelDrag(); return }
   if (shapeDragging) { shapeOnUp(e); return }
   painting = false; panning = false; hover.value = null; render()
@@ -3073,13 +3297,11 @@ function drawGridLayer(
   ctx.lineWidth = Math.max(0.5, cfg.width || 1)
   ctx.setLineDash(dash)
   ctx.beginPath()
-  for (let x = 0; x <= g.width; x++) {
-    if (x % cfg.step !== 0) continue
+  for (let x = ((cfg.offsetX||0)%cfg.step+cfg.step)%cfg.step; x <= g.width; x += cfg.step) {
     const px = ox + x * cell
     ctx.moveTo(px, oy); ctx.lineTo(px, oy + g.height * cell)
   }
-  for (let y = 0; y <= g.height; y++) {
-    if (y % cfg.step !== 0) continue
+  for (let y = ((cfg.offsetY||0)%cfg.step+cfg.step)%cfg.step; y <= g.height; y += cfg.step) {
     const py = oy + y * cell
     ctx.moveTo(ox, py); ctx.lineTo(ox + g.width * cell, py)
   }
@@ -3154,6 +3376,38 @@ function drawHighlightOverlay(
         }
       }
     }
+  }
+  // ---- persistent green marks ----
+  ctx.strokeStyle = '#3cb371'
+  ctx.lineWidth = Math.max(2, cell * 0.08)
+  // marked rows
+  for (const r of markedRows.value) {
+    if (r < 0 || r >= g.height) continue
+    ctx.strokeRect(ox + 1, oy + r * cell + 1, W - 2, cell - 2)
+  }
+  // marked cols
+  for (const c of markedCols.value) {
+    if (c < 0 || c >= g.width) continue
+    ctx.strokeRect(ox + c * cell + 1, oy + 1, cell - 2, H - 2)
+  }
+  // marked codes
+  const target = currentCode.value
+  for (const code of markedCodes.value) {
+    for (let y = 0; y < g.height; y++) {
+      for (let x = 0; x < g.width; x++) {
+        if (g.cells[y * g.width + x] === code) {
+          ctx.strokeRect(ox + x * cell + 2, oy + y * cell + 2, cell - 4, cell - 4)
+        }
+      }
+    }
+  }
+  // marked rects
+  ctx.fillStyle = 'rgba(60,179,113,0.12)'
+  for (const mr of markedRects.value) {
+    const rx = ox + mr.x * cell, ry = oy + mr.y * cell
+    const rw = mr.w * cell, rh = mr.h * cell
+    ctx.fillRect(rx, ry, rw, rh)
+    ctx.strokeRect(rx + 1, ry + 1, rw - 2, rh - 2)
   }
   ctx.restore()
 }
@@ -3542,6 +3796,16 @@ function onKeyDown(e: KeyboardEvent) {
     }
   }
 
+  // arrow keys in pan mode: nudge the reference grid origin
+  if (tool.value === 'pan' && !panGridStart) {
+    let dx = 0, dy = 0
+    if (e.key === 'ArrowUp') dy = -1
+    else if (e.key === 'ArrowDown') dy = 1
+    else if (e.key === 'ArrowLeft') dx = -1
+    else if (e.key === 'ArrowRight') dx = 1
+    if (dx || dy) { e.preventDefault(); doNudge(dx, dy); return }
+  }
+
   // undo / redo
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
     e.preventDefault()
@@ -3566,6 +3830,7 @@ function onKeyDown(e: KeyboardEvent) {
     case 's': tool.value = 'select'; break
     case 'i': tool.value = 'pick'; break
     case 'h': tool.value = 'pan'; break
+    case 'z': zoomBy(e.shiftKey ? -1 : 1); break
     case 'f': fullscreen.value = !fullscreen.value; break
     case ' ':
       e.preventDefault()
@@ -4371,455 +4636,4 @@ watch(grid, () => { clearSelection(); render() })
   display: flex; align-items: center; gap: 0.35rem;
   font-size: 0.85rem; color: var(--plum-2); font-weight: 700;
 }
-.resize-fields .input { width: 78px; text-align: center; }
-.resize-x-sign { color: var(--plum-3); font-weight: 700; }
-.resize-unit { font-size: 0.72rem; color: var(--plum-3); }
-.resize-anchor-label {
-  font-size: 0.74rem; color: var(--plum-2); font-weight: 700; margin-top: 0.2rem;
-}
-.resize-anchor {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 4px;
-  width: 96px;
-}
-.anchor-cell {
-  aspect-ratio: 1;
-  border: 2px solid var(--cream-4);
-  background: #fff;
-  border-radius: 5px;
-  cursor: pointer;
-  transition: all var(--transition-fast);
-}
-.anchor-cell:hover { border-color: var(--sakura-light); }
-.anchor-cell.on {
-  background: var(--sakura);
-  border-color: var(--sakura);
-  box-shadow: 0 2px 8px var(--sakura-glow);
-}
-.resize-note {
-  font-size: 0.72rem; color: var(--plum-3); line-height: 1.6;
-  background: var(--cream-2); border-radius: var(--radius-sm); padding: 0.45rem 0.6rem;
-}
-.resize-foot {
-  display: flex; justify-content: flex-end; gap: 0.6rem;
-  margin-top: 1rem; padding-top: 0.8rem;
-  border-top: 2px dashed var(--line-strong);
-}
-.zoom-label { font-size: 0.76rem; color: var(--plum-2); min-width: 42px; text-align: center; }
-.grid-size { font-size: 0.76rem; color: var(--plum-3); }
-
-.canvas-wrap {
-  position: relative;
-  height: 64vh;
-  min-height: 360px;
-  background: #fdf6f0;
-  overflow: hidden;
-  cursor: crosshair;
-}
-.canvas-wrap canvas { display: block; }
-.hover-tip {
-  position: absolute;
-  background: var(--plum-1);
-  color: #fff;
-  font-size: 0.72rem;
-  font-family: var(--font-mono);
-  padding: 0.2rem 0.5rem;
-  border-radius: var(--radius-sm);
-  pointer-events: none;
-  white-space: nowrap;
-  z-index: 5;
-}
-
-/* free-transform action bar */
-.canvas-wrap.xforming { cursor: default; }
-.xform-bar {
-  position: absolute;
-  top: 10px;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  background: rgba(255, 255, 255, 0.96);
-  border: 2px solid var(--plum-1);
-  border-radius: var(--radius-pill);
-  padding: 0.35rem 0.45rem 0.35rem 0.85rem;
-  box-shadow: var(--shadow-soft);
-  z-index: 8;
-}
-.xform-title {
-  font-family: var(--font-display);
-  font-size: 0.86rem;
-  color: var(--plum-1);
-}
-.xform-info {
-  font-size: 0.74rem;
-  color: var(--plum-2);
-}
-
-/* ===== side ===== */
-.side-col { display: flex; flex-direction: column; gap: 1rem; }
-.side-card { padding: 0.8rem 0.9rem; }
-.side-head {
-  font-family: var(--font-display);
-  font-size: 0.95rem;
-  color: var(--plum-1);
-  display: flex; align-items: center; justify-content: space-between;
-  margin-bottom: 0.6rem;
-}
-.side-count { font-size: 0.7rem; font-family: var(--font-mono); color: var(--plum-3); }
-.side-sub { font-size: 0.72rem; color: var(--plum-3); margin: -0.35rem 0 0.55rem; }
-.side-empty { font-size: 0.78rem; color: var(--plum-3); padding: 0.5rem 0; }
-
-.palette-scroll {
-  max-height: 320px;
-  overflow-y: auto;
-  padding-right: 2px;
-}
-.pal-group { margin-bottom: 0.55rem; }
-.pal-group:last-child { margin-bottom: 0; }
-.pal-group-label {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  font-size: 0.7rem;
-  color: var(--plum-2);
-  margin-bottom: 0.25rem;
-  position: sticky;
-  top: 0;
-  background: #fff;
-  padding: 0.1rem 0;
-  z-index: 1;
-}
-.pal-group-key {
-  font-family: var(--font-mono);
-  font-weight: 800;
-  color: var(--sakura-deep);
-  background: var(--sakura-glow);
-  border-radius: 4px;
-  padding: 0 0.3rem;
-}
-.pal-group-n { margin-left: auto; color: var(--plum-3); font-family: var(--font-mono); }
-.palette-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(20px, 1fr));
-  gap: 3px;
-}
-.pal-swatch {
-  aspect-ratio: 1;
-  border: 1.5px solid rgba(0,0,0,0.08);
-  border-radius: 4px;
-  cursor: pointer;
-  padding: 0;
-  transition: transform var(--transition-fast);
-  position: relative;
-}
-.pal-swatch:hover { transform: scale(1.25); z-index: 2; }
-.pal-swatch.used::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: 3px;
-  box-shadow: inset 0 0 0 1.5px rgba(255,255,255,0.85);
-}
-.pal-swatch.on {
-  box-shadow: 0 0 0 2.5px var(--sakura);
-  transform: scale(1.2);
-  z-index: 3;
-}
-
-.color-list { max-height: 240px; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; }
-.color-row {
-  display: grid;
-  grid-template-columns: 18px 42px 1fr auto;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.25rem 0.3rem;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition: background var(--transition-fast);
-}
-.color-row:hover { background: var(--sakura-glow); }
-.cl-swatch { width: 16px; height: 16px; border-radius: 4px; border: 1px solid rgba(0,0,0,0.1); }
-.cl-code { font-size: 0.72rem; color: var(--plum-2); }
-.cl-name { font-size: 0.76rem; color: var(--plum-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cl-count { font-size: 0.74rem; color: var(--sakura-deep); font-weight: 700; }
-
-.gap-block { margin-bottom: 0.6rem; }
-.gap-block:last-child { margin-bottom: 0; }
-.gap-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.3rem; }
-.gap-tier { font-size: 0.8rem; font-weight: 700; color: var(--plum-1); font-family: var(--font-round); }
-.gap-stat { font-size: 0.72rem; font-weight: 700; color: var(--bad); }
-.gap-stat.ok { color: var(--ok); }
-.gap-pairs {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  max-height: 150px;
-  overflow-y: auto;
-}
-.gap-pair {
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
-  padding: 1px 0;
-}
-.gap-swatch {
-  width: 15px; height: 15px;
-  border-radius: 4px;
-  border: 1px solid rgba(0,0,0,0.12);
-  flex-shrink: 0;
-}
-.gap-swatch.miss {
-  border-style: dashed;
-  border-color: var(--bad);
-}
-.gap-arrow { font-size: 0.7rem; color: var(--plum-3); }
-.gap-sub-code { font-size: 0.66rem; color: var(--plum-2); }
-
-/* ===== bead-size toggle ===== */
-.bead-size-toggle {
-  display: inline-flex;
-  gap: 2px;
-  background: var(--cream-2);
-  border-radius: var(--radius-pill);
-  padding: 2px;
-}
-.pill-btn {
-  padding: 0.25rem 0.65rem;
-  border: 2px solid transparent;
-  background: transparent;
-  border-radius: var(--radius-pill);
-  font-family: var(--font-round);
-  font-weight: 700;
-  font-size: 0.78rem;
-  color: var(--plum-3);
-  cursor: pointer;
-  transition: all var(--transition-fast);
-  line-height: 1.3;
-}
-.pill-btn.on {
-  background: #fff;
-  border-color: var(--sakura);
-  color: var(--sakura-deep);
-  box-shadow: 0 2px 6px var(--sakura-glow);
-}
-.pill-btn:hover:not(.on) { color: var(--plum-1); }
-.pill-sub {
-  font-size: 0.62rem;
-  padding: 0.25rem 0.4rem;
-  opacity: 0.5;
-  min-width: 20px;
-}
-.pill-sub:hover { opacity: 1; }
-
-/* ===== reference image overlay ===== */
-.ref-section {
-  padding: 0.35rem 0.75rem;
-  border-top: 2px dashed var(--line-strong);
-  background: var(--cream-2);
-}
-.ref-toggle {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  cursor: pointer;
-  font-size: 0.82rem;
-  font-weight: 700;
-  color: var(--plum-2);
-  user-select: none;
-}
-.ref-toggle-icon { font-size: 0.65rem; }
-.ref-badge {
-  font-size: 0.65rem;
-  background: var(--sakura-glow);
-  color: var(--sakura-deep);
-  padding: 0.05rem 0.5rem;
-  border-radius: var(--radius-pill);
-}
-.ref-body {
-  margin-top: 0.5rem;
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-}
-.ref-upload {
-  border: 2px dashed var(--cream-4);
-  border-radius: var(--radius-md);
-  padding: 0.4rem 0.85rem;
-  cursor: pointer;
-  font-size: 0.78rem;
-  color: var(--plum-3);
-  text-align: center;
-  transition: border var(--transition-fast);
-}
-.ref-upload:hover { border-color: var(--sakura-light); }
-.ref-thumb {
-  width: 42px; height: 42px;
-  object-fit: cover;
-  border-radius: var(--radius-sm);
-  border: 1.5px solid var(--cream-4);
-}
-.ref-controls {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-}
-.ref-slider-label {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  font-size: 0.72rem;
-  color: var(--plum-3);
-}
-.ref-slider { width: 80px; }
-.ref-lock-btn {
-  background: none;
-  border: 1.5px solid var(--cream-4);
-  border-radius: var(--radius-sm);
-  padding: 0.1rem 0.35rem;
-  cursor: pointer;
-  font-size: 0.9rem;
-  line-height: 1;
-  transition: all var(--transition-fast);
-}
-.ref-lock-btn.locked { border-color: var(--sakura); background: var(--sakura-glow); }
-
-/* ===== palette mode toggle ===== */
-.mode-toggle {
-  display: inline-flex;
-  gap: 2px;
-  background: var(--cream-2);
-  border-radius: var(--radius-pill);
-  padding: 2px;
-}
-
-/* auto-subject checkbox */
-.subj-check {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  font-size: 0.82rem;
-  color: var(--plum-2);
-  cursor: pointer;
-  user-select: none;
-}
-.subj-check input { cursor: pointer; }
-.mode-btn {
-  padding: 0.28rem 0.75rem;
-  border: 2px solid transparent;
-  background: transparent;
-  border-radius: var(--radius-pill);
-  font-family: var(--font-round);
-  font-weight: 700;
-  font-size: 0.8rem;
-  color: var(--plum-3);
-  cursor: pointer;
-  transition: all var(--transition-fast);
-  line-height: 1.3;
-}
-.mode-btn.on {
-  background: #fff;
-  border-color: var(--sakura);
-  color: var(--sakura-deep);
-  box-shadow: 0 2px 6px var(--sakura-glow);
-}
-.mode-btn:hover:not(.on) { color: var(--plum-1); }
-
-/* ===== my palette side card ===== */
-.my-pal-card .my-pal-mode {
-  margin-bottom: 0.6rem;
-}
-.my-pal-pick-btn {
-  width: 100%;
-  margin-bottom: 0.5rem;
-}
-.my-pal-add {
-  display: flex;
-  gap: 0.4rem;
-  margin-bottom: 0.4rem;
-}
-.my-pal-input { flex: 1; min-width: 0; font-family: var(--font-mono); text-transform: uppercase; }
-.my-pal-actions {
-  display: flex;
-  gap: 0.4rem;
-  margin-bottom: 0.5rem;
-}
-.my-pal-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(42px, 1fr));
-  gap: 4px;
-  max-height: 240px;
-  overflow-y: auto;
-  padding-right: 2px;
-}
-.my-pal-chip {
-  aspect-ratio: 1;
-  border: 1.5px solid rgba(0,0,0,0.12);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 1px;
-  font-family: var(--font-mono);
-  font-weight: 800;
-  padding: 0;
-  transition: transform var(--transition-fast);
-}
-.my-pal-chip:hover { transform: scale(1.1); z-index: 2; }
-.chip-code { font-size: 0.62rem; line-height: 1; }
-.chip-x {
-  font-size: 0.5rem;
-  line-height: 1;
-  opacity: 0;
-  transition: opacity var(--transition-fast);
-}
-.my-pal-chip:hover .chip-x { opacity: 0.85; }
-
-/* "press F for fullscreen" tip — top-right of canvas */
-.fs-tip {
-  position: absolute;
-  top: 12px;
-  right: 14px;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.45rem 0.8rem 0.45rem 0.55rem;
-  background: linear-gradient(135deg, #fff 0%, var(--cream-2) 100%);
-  border: 2px solid var(--sakura);
-  border-radius: 999px;
-  box-shadow: 0 4px 14px rgba(255, 107, 157, 0.25);
-  font-family: var(--font-body);
-  font-weight: 700;
-  font-size: 0.78rem;
-  color: var(--plum-1);
-  pointer-events: none;
-  z-index: 20;
-}
-.fs-tip-key {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 1.4rem;
-  height: 1.4rem;
-  padding: 0 0.4rem;
-  background: var(--sakura);
-  color: #fff;
-  border-radius: 6px;
-  font-family: var(--font-mono);
-  font-weight: 800;
-  font-size: 0.8rem;
-  box-shadow: 0 2px 0 #d75d8a;
-}
-.fs-tip-text { white-space: nowrap; }
-.fs-tip-enter-active, .fs-tip-leave-active {
-  transition: opacity 0.3s ease, transform 0.3s ease;
-}
-.fs-tip-enter-from { opacity: 0; transform: translateY(-6px) scale(0.92); }
-.fs-tip-leave-to   { opacity: 0; transform: translateY(-4px) scale(0.96); }
-</style>
+.re
