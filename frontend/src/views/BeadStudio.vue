@@ -3307,7 +3307,7 @@ function render() {
 }
 
 // ---- minimap (top-right thumbnail when in immersive highlight mode) ----
-const MINI_W = 360, MINI_H = 260
+const MINI_W = 540, MINI_H = 390
 function drawMinimap(vx0: number, vy0: number, vx1: number, vy1: number) {
   const cv = minimapRef.value, g = grid.value
   if (!cv || !g || !immersive.value) return
@@ -3349,9 +3349,9 @@ function drawMinimap(vx0: number, vy0: number, vx1: number, vy1: number) {
     if (!cfg.enabled || !cfg.step || cfg.step < 1) return
     ctx.save()
     ctx.strokeStyle = cfg.color
-    ctx.lineWidth = 1
+    ctx.lineWidth = 1.5
     ctx.setLineDash(dash)
-    ctx.globalAlpha = 0.55
+    ctx.globalAlpha = 0.8
     ctx.beginPath()
     for (let x = ((cfg.offsetX||0)%cfg.step+cfg.step)%cfg.step; x <= g.width; x += cfg.step) {
       const px = offX + x * scale
