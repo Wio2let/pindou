@@ -228,7 +228,7 @@
             <b class="mono">{{ activeBrushSize }}×{{ activeBrushSize }}</b>
             <span class="size-hint">⇧滚轮</span>
           </div>
-          <div class="size-tag" v-show="tool === 'pan'" title="拖拽或方向键移动参考线">移动参考线 <span class="size-hint">拖拽·↑↓←→</span></div>
+          <div class="size-tag" v-show="tool === 'pan'" title="拖拽或方向键移动画布">移动画布 <span class="size-hint">拖拽·↑↓←→</span></div>
           <!-- mirror-copy config -->
           <div class="mirror-cfg" v-show="tool === 'mirror'">
             <button class="tool-btn mini-btn" :class="{ on: mirrorAxis === 'v' }"
@@ -311,11 +311,6 @@
                        v-model.number="gridConfig.solid.step"
                        :disabled="!gridConfig.solid.enabled" />
                 <span class="gl-sub">格</span>
-                <input type="color" class="gl-color"
-                       :value="hexOf(gridConfig.solid.color)"
-                       @input="gridConfig.solid.color = ($event.target as HTMLInputElement).value"
-                       :disabled="!gridConfig.solid.enabled"
-                       title="选颜色" />
                 <input type="number" min="0.5" step="0.5" max="6" class="gl-num gl-num-sm"
                        v-model.number="gridConfig.solid.width"
                        :disabled="!gridConfig.solid.enabled"
@@ -331,15 +326,24 @@
                        v-model.number="gridConfig.dashed.step"
                        :disabled="!gridConfig.dashed.enabled" />
                 <span class="gl-sub">格</span>
-                <input type="color" class="gl-color"
-                       :value="hexOf(gridConfig.dashed.color)"
-                       @input="gridConfig.dashed.color = ($event.target as HTMLInputElement).value"
-                       :disabled="!gridConfig.dashed.enabled"
-                       title="选颜色" />
                 <input type="number" min="0.5" step="0.5" max="6" class="gl-num gl-num-sm"
                        v-model.number="gridConfig.dashed.width"
                        :disabled="!gridConfig.dashed.enabled"
                        title="线宽 (px)" />
+              </div>
+              <div class="gl-row gl-offset-row" title="同步移动实线和虚线参考线的位置">
+                <span class="gl-row-title">偏移</span>
+                <span class="gl-sub">X</span>
+                <input type="number" class="gl-num"
+                       v-model.number="gridConfig.solid.offsetX"
+                       @input="syncOffset('x', Number(($event.target as HTMLInputElement).value))" />
+                <span class="gl-sub">Y</span>
+                <input type="number" class="gl-num"
+                       v-model.number="gridConfig.solid.offsetY"
+                       @input="syncOffset('y', Number(($event.target as HTMLInputElement).value))" />
+                <span class="gl-sub">格</span>
+                <button class="btn btn-ghost btn-sm" @click="resetGridOffset"
+                        title="重置偏移">↺</button>
               </div>
               <div class="gl-row">
                 <label class="gl-chk"><span class="gl-row-title">原点偏移</span></label>
@@ -410,7 +414,7 @@
           <span class="grid-size mono" title="按豆径换算的成品尺寸">
             ≈ {{ finishedSize }}
           </span>
-          <span class="kbd-hint" title="B 画笔 · E 橡皮 · G 魔棒画笔 · D 魔棒橡皮 · R 替换 · M 镜像复制 · S 选区 · I 取色 · H=移动参考线 · 空格 移动视图 · Z/⇧Z 缩放 · F 全屏 · ⇧+滚轮 笔刷大小 · +/- 缩放 · 0 适应 · Ctrl+Z 撤销 · 高亮模式下 ↑↓←→ 切换行列、Esc 退出">⌨ 快捷键</span>
+          <span class="kbd-hint" title="B 画笔 · E 橡皮 · G 魔棒画笔 · D 魔棒橡皮 · R 替换 · M 镜像复制 · S 选区 · I 取色 · H=移动画布 · 空格 移动视图 · Z/⇧Z 缩放 · F 全屏 · ⇧+滚轮 笔刷大小 · +/- 缩放 · 0 适应 · Ctrl+Z 撤销 · 高亮模式下 ↑↓←→ 切换行列、Esc 退出">⌨ 快捷键</span>
           <label class="export-opt" style="margin-left:auto;" title="在画布每颗豆上显示 MARD 色号">
             <input type="checkbox" v-model="showLabels" />
             <span>标色号</span>
@@ -568,13 +572,13 @@
             <button class="btn btn-sm btn-primary" @click="applyTransform">✓ 应用</button>
             <button class="btn btn-sm btn-ghost" @click="cancelTransform">✕ 取消</button>
           </div>
-          <!-- pan D-pad — moves grid-line origin -->
+          <!-- pan D-pad — moves the canvas view -->
           <div v-if="tool === 'pan' && !transforming" class="pan-dpad">
-            <button class="dpad-btn dpad-up"    title="参考线上移 (↑)" @mousedown.prevent="startNudge('up')"    @mouseup="stopNudge" @mouseleave="stopNudge">▲</button>
-            <button class="dpad-btn dpad-left"  title="参考线左移 (←)" @mousedown.prevent="startNudge('left')"  @mouseup="stopNudge" @mouseleave="stopNudge">◀</button>
-            <span class="dpad-center"><span class="dpad-label mono">↦{{ gridConfig.solid.offsetX }},{{ gridConfig.solid.offsetY }}</span></span>
-            <button class="dpad-btn dpad-right" title="参考线右移 (→)" @mousedown.prevent="startNudge('right')" @mouseup="stopNudge" @mouseleave="stopNudge">▶</button>
-            <button class="dpad-btn dpad-down"  title="参考线下移 (↓)" @mousedown.prevent="startNudge('down')"  @mouseup="stopNudge" @mouseleave="stopNudge">▼</button>
+            <button class="dpad-btn dpad-up"    title="画布上移 (↑)" @mousedown.prevent="startPanNudge('up')"    @mouseup="stopPanNudge" @mouseleave="stopPanNudge">▲</button>
+            <button class="dpad-btn dpad-left"  title="画布左移 (←)" @mousedown.prevent="startPanNudge('left')"  @mouseup="stopPanNudge" @mouseleave="stopPanNudge">◀</button>
+            <span class="dpad-center"><span class="dpad-label mono">{{ offset.x }},{{ offset.y }}</span></span>
+            <button class="dpad-btn dpad-right" title="画布右移 (→)" @mousedown.prevent="startPanNudge('right')" @mouseup="stopPanNudge" @mouseleave="stopPanNudge">▶</button>
+            <button class="dpad-btn dpad-down"  title="画布下移 (↓)" @mousedown.prevent="startPanNudge('down')"  @mouseup="stopPanNudge" @mouseleave="stopPanNudge">▼</button>
           </div>
         </div>
         </div>
@@ -922,50 +926,37 @@ function resetGridConfig() {
     dashed: { enabled: true, step: 5,  color: '#7c5cff', width: 1, offsetX: 0, offsetY: 0 },
   }
 }
-const NUDGE_STEP = 1           // cells per nudge tick
-let nudgeTimer: number | null = null
-let nudgeDir = { x: 0, y: 0 }
-function startNudge(dir: 'up' | 'down' | 'left' | 'right') {
-  const map: Record<string,{x:number;y:number}> = { up: {x:0,y:-1}, down: {x:0,y:1}, left: {x:-1,y:0}, right: {x:1,y:0} }
-  nudgeDir = map[dir]
-  doNudge(nudgeDir.x, nudgeDir.y)
-  if (nudgeTimer == null) nudgeTimer = window.setTimeout(() => { doNudge(nudgeDir.x, nudgeDir.y); nudgeTimer = window.setInterval(() => doNudge(nudgeDir.x, nudgeDir.y), 60) }, 300)
+/** Pan the canvas by a delta (px). */
+function panCanvasBy(dx: number, dy: number) {
+  offset.value = { x: (offset.value.x || 0) + dx, y: (offset.value.y || 0) + dy }
+  render()
 }
-function stopNudge() {
-  nudgeDir = { x: 0, y: 0 }
-  if (nudgeTimer != null) { clearInterval(nudgeTimer); clearTimeout(nudgeTimer); nudgeTimer = null }
+/** Repeatable pan-nudge via D-pad buttons. */
+let panNudgeTimer: number | null = null
+let panNudgeDir = { x: 0, y: 0 }
+const PAN_NUDGE_PX = 12
+function startPanNudge(dir: 'up' | 'down' | 'left' | 'right') {
+  const map: Record<string,{x:number;y:number}> = { up: {x:0,y:-PAN_NUDGE_PX}, down: {x:0,y:PAN_NUDGE_PX}, left: {x:-PAN_NUDGE_PX,y:0}, right: {x:PAN_NUDGE_PX,y:0} }
+  panNudgeDir = map[dir]
+  panCanvasBy(panNudgeDir.x, panNudgeDir.y)
+  if (panNudgeTimer == null) panNudgeTimer = window.setTimeout(() => { panCanvasBy(panNudgeDir.x, panNudgeDir.y); panNudgeTimer = window.setInterval(() => panCanvasBy(panNudgeDir.x, panNudgeDir.y), 60) }, 300)
 }
-function doNudge(dx: number, dy: number) {
-  if (!dx && !dy) return
+function stopPanNudge() {
+  panNudgeDir = { x: 0, y: 0 }
+  if (panNudgeTimer != null) { clearInterval(panNudgeTimer); clearTimeout(panNudgeTimer); panNudgeTimer = null }
+}
+
+/** Sync both solid+dashed grid offsets to the same value (called via @input). */
+function syncOffset(axis: 'x' | 'y', val: number) {
   const s = gridConfig.value.solid, d = gridConfig.value.dashed
-  s.offsetX = (s.offsetX || 0) + dx
-  s.offsetY = (s.offsetY || 0) + dy
-  d.offsetX = (d.offsetX || 0) + dx
-  d.offsetY = (d.offsetY || 0) + dy
+  if (axis === 'x') { s.offsetX = val; d.offsetX = val }
+  else { s.offsetY = val; d.offsetY = val }
   gridConfig.value = { solid: { ...s }, dashed: { ...d } }
 }
-/** true while the user is dragging on the canvas in pan-grid mode */
-let panGridStart: { x: number; y: number; ox: number; oy: number } | null = null
-function panGridOnDown(e: MouseEvent) {
-  panGridStart = {
-    x: e.clientX, y: e.clientY,
-    ox: (gridConfig.value.solid.offsetX || 0),
-    oy: (gridConfig.value.solid.offsetY || 0),
-  }
-}
-function panGridOnMove(e: MouseEvent) {
-  if (!panGridStart) return
-  const dx = Math.round((e.clientX - panGridStart.x) / 4)
-  const dy = Math.round((e.clientY - panGridStart.y) / 4)
+function resetGridOffset() {
   const s = gridConfig.value.solid, d = gridConfig.value.dashed
-  s.offsetX = panGridStart.ox + dx
-  s.offsetY = panGridStart.oy + dy
-  d.offsetX = panGridStart.ox + dx
-  d.offsetY = panGridStart.oy + dy
+  s.offsetX = 0; s.offsetY = 0; d.offsetX = 0; d.offsetY = 0
   gridConfig.value = { solid: { ...s }, dashed: { ...d } }
-}
-function panGridOnUp() {
-  panGridStart = null
 }
 // close grid popover on click-outside
 watch(showGridMenu, (open) => {
@@ -1474,7 +1465,7 @@ const tools: { id: Tool; svg: string; label: string; key: string }[] = [
   { id: 'pick', label: '取色', key: 'I', svg:
     '<rect x="14" y="2.6" width="7.2" height="7.2" rx="2.2" transform="rotate(45 17.6 6.2)" fill="currentColor" stroke="none"/>' +
     '<path d="M15.6 8.4 3.6 20.4" stroke-width="2.6"/>' },
-  { id: 'pan', label: '移动参考线', key: 'H', svg:
+  { id: 'pan', label: '移动画布', key: 'H', svg:
     '<path d="M18 11V6a2 2 0 0 0-4 0"/>' +
     '<path d="M14 10V4a2 2 0 0 0-4 0v2"/>' +
     '<path d="M10 10.5V6a2 2 0 0 0-4 0v8"/>' +
@@ -2037,13 +2028,12 @@ function zoomAt(cx: number, cy: number, factor: number) {
   render()
 }
 // ---- touch support ----
-let touchState: {
+const touchState: {
   fingers: number
   startDist: number
   startZoom: number
   lastCenter: { x: number; y: number } | null
-  panFinger: number | null
-} = { fingers: 0, startDist: 0, startZoom: 1, lastCenter: null, panFinger: null }
+} = { fingers: 0, startDist: 0, startZoom: 1, lastCenter: null }
 
 function cellAtTouch(t: Touch): { x: number; y: number } | null {
   const g = grid.value, wrap = wrapRef.value
@@ -2058,7 +2048,7 @@ function cellAtTouch(t: Touch): { x: number; y: number } | null {
 
 function onTouchStart(e: TouchEvent) {
   if (e.touches.length === 2) {
-    // 2 fingers = pan grid lines; Shift+2 fingers = pinch zoom
+    // 2 fingers = pan canvas; Shift+2 fingers = pinch zoom
     if (e.shiftKey) {
       const dx = e.touches[0].clientX - e.touches[1].clientX
       const dy = e.touches[0].clientY - e.touches[1].clientY
@@ -2071,7 +2061,9 @@ function onTouchStart(e: TouchEvent) {
       }
     } else {
       touchState.fingers = 2
-      panGridOnDown(e.touches[0] as unknown as MouseEvent)
+      const t = e.touches[0]
+      panning = true
+      panStart = { x: t.clientX, y: t.clientY, ox: offset.value.x, oy: offset.value.y }
     }
     e.preventDefault()
     return
@@ -2096,7 +2088,14 @@ function onTouchMove(e: TouchEvent) {
         }
       }
     } else {
-      panGridOnMove(e.touches[0] as unknown as MouseEvent)
+      if (panning) {
+        const t = e.touches[0]
+        offset.value = {
+          x: panStart.ox + (t.clientX - panStart.x),
+          y: panStart.oy + (t.clientY - panStart.y),
+        }
+        render()
+      }
     }
     e.preventDefault()
     return
@@ -2108,7 +2107,7 @@ function onTouchMove(e: TouchEvent) {
 
 function onTouchEnd(e: TouchEvent) {
   if (touchState.fingers === 2 && !e.shiftKey) {
-    panGridOnUp()
+    panning = false
   } else if (touchState.fingers === 1) {
     onUp(e.changedTouches[0] as unknown as MouseEvent)
   }
@@ -3057,7 +3056,11 @@ function shapeOnUp(e: MouseEvent) {
 
 function onDown(e: MouseEvent) {
   if (transforming.value) { transformOnDown(e); return }
-  if (tool.value === 'pan') { panGridOnDown(e); return }
+  if (tool.value === 'pan') {
+    panning = true
+    panStart = { x: e.clientX, y: e.clientY, ox: offset.value.x, oy: offset.value.y }
+    return
+  }
   if (e.button === 1) {
     panning = true
     panStart = { x: e.clientX, y: e.clientY, ox: offset.value.x, oy: offset.value.y }
@@ -3076,7 +3079,6 @@ function onDown(e: MouseEvent) {
 }
 function onMove(e: MouseEvent) {
   if (transforming.value) { if (xDrag) transformOnMove(e); return }
-  if (panGridStart) { panGridOnMove(e); return }
   if (panning) {
     offset.value = {
       x: panStart.ox + (e.clientX - panStart.x),
@@ -3104,14 +3106,12 @@ function onMove(e: MouseEvent) {
 }
 function onUp(e: MouseEvent) {
   if (transforming.value) { xDrag = null; return }
-  if (panGridStart) { panGridOnUp(); return }
   if (selMode !== 'none') { finishSelDrag(); return }
   if (shapeDragging) { shapeOnUp(e); return }
   painting = false; panning = false
 }
 function onLeave(e: MouseEvent) {
   if (transforming.value) { xDrag = null; return }
-  if (panGridStart) { panGridOnUp(); return }
   if (selMode !== 'none') { finishSelDrag(); return }
   if (shapeDragging) { shapeOnUp(e); return }
   painting = false; panning = false; hover.value = null; render()
@@ -3796,14 +3796,14 @@ function onKeyDown(e: KeyboardEvent) {
     }
   }
 
-  // arrow keys in pan mode: nudge the reference grid origin
-  if (tool.value === 'pan' && !panGridStart) {
-    let dx = 0, dy = 0
-    if (e.key === 'ArrowUp') dy = -1
-    else if (e.key === 'ArrowDown') dy = 1
-    else if (e.key === 'ArrowLeft') dx = -1
-    else if (e.key === 'ArrowRight') dx = 1
-    if (dx || dy) { e.preventDefault(); doNudge(dx, dy); return }
+  // arrow keys in pan mode: pan the canvas
+  if (tool.value === 'pan') {
+    let dx = 0, dy = 0, step = 20
+    if (e.key === 'ArrowUp') dy = -step
+    else if (e.key === 'ArrowDown') dy = step
+    else if (e.key === 'ArrowLeft') dx = -step
+    else if (e.key === 'ArrowRight') dx = step
+    if (dx || dy) { e.preventDefault(); panCanvasBy(dx, dy); return }
   }
 
   // undo / redo
@@ -4406,12 +4406,7 @@ watch(grid, () => { clearSelection(); render() })
 .gl-num:focus { border-color: var(--sakura); }
 .gl-num:disabled { opacity: 0.4; cursor: not-allowed; }
 .gl-num-sm { width: 50px; margin-left: auto; }
-.gl-color {
-  width: 30px; height: 26px; padding: 0; cursor: pointer;
-  border: 1.5px solid var(--cream-4); border-radius: var(--radius-sm);
-  background: #fff;
-}
-.gl-color:disabled { opacity: 0.4; cursor: not-allowed; }
+.gl-offset-row { gap: 0.25rem; padding-top: 0.2rem; border-top: 2px dashed var(--line-strong); margin-top: 0.15rem; }
 .gl-foot { display: flex; justify-content: flex-end; padding-top: 0.15rem; }
 
 /* highlight-mode dropdown + status / per-mode controls */
