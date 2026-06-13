@@ -4301,7 +4301,6 @@ watch(grid, () => { clearSelection(); render() })
   display: flex;
   flex-direction: column;
 }
-.canvas-col.immersive .tool-rail,
 .canvas-col.immersive .toolbar,
 .canvas-col.immersive .param-bar,
 .canvas-col.immersive .ref-section,
