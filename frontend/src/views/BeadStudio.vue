@@ -1969,24 +1969,35 @@ function resampleGrid(newW: number, newH: number) {
   gridVersion.value++
 }
 
-// Tweaking width / algorithm / palette re-converts from the source image
-// (debounced, undoable — convert() snapshots the previous grid first).
-// For a blank / hand-drawn canvas (no source image) a width change instead
-// resizes the current grid by resampling it.
-// `suppressReconv` blocks the watch while undo/redo syncs the width slider.
+/**
+ * Watcher for live parameter changes.
+ *
+ * Rules:
+ * - **colorLimit**: always in-place on current grid (never discards edits).
+ * - **Palette** (tier / palMode / myPaletteCodes) or **matchMetric** change:
+ *   re-map the current grid's cells to the nearest color in the new
+ *   palette/metric **in-place** — preserves manual edits & canvas size.
+ * - **algo** change: re-convert from source image (different pixelation).
+ * - **gridWidth** with source: resample (or re-convert for non-pixelfit).
+ * - gridWidth without source (blank canvas): resample.
+ * - When algo+palette change simultaneously: full re-convert (user changed
+ *   pixelation, so source re-processing is intentional).
+ *
+ * `suppressReconv` blocks the watch while undo/redo syncs the width slider.
+ */
 let suppressReconv = false
 let reconvTimer: number | undefined
 watch([gridWidth, algo, tier, matchMetric, palMode, myPaletteCodes, colorLimit], (nv, ov) => {
   if (suppressReconv || !grid.value || transforming.value) return
   if (reconvTimer) clearTimeout(reconvTimer)
-  const widthChanged = nv[0] !== ov[0]
-  // anything other than the width — algorithm / palette / colour-limit …
-  const otherChanged = nv[1] !== ov[1] || nv[2] !== ov[2] || nv[3] !== ov[3]
-                    || nv[4] !== ov[4] || nv[5] !== ov[5]
-  const colorLimitChanged = nv[6] !== ov[6]
 
-  // colour-limit always operates on the current grid in-place, never re-converts
-  // from the source image (preserves any manual edits on the canvas).
+  const widthChanged       = nv[0] !== ov[0]
+  const algoChanged        = nv[1] !== ov[1]
+  const paletteChanged     = nv[2] !== ov[2] || nv[4] !== ov[4] || nv[5] !== ov[5]
+  const metricChanged      = nv[3] !== ov[3]
+  const colorLimitChanged  = nv[6] !== ov[6]
+
+  // ===== colour-limit: always in-place on the current grid =====
   if (colorLimitChanged) {
     if (colorLimit.value > 0) {
       reconvTimer = window.setTimeout(() => {
@@ -2003,6 +2014,33 @@ watch([gridWidth, algo, tier, matchMetric, palMode, myPaletteCodes, colorLimit],
     return
   }
 
+  // ===== palette / metric change: re-map current grid colours in-place =====
+  // Preserves manual edits & canvas dimensions — does NOT go back to the
+  // source image.  Only when algo ALSO changed do we fall through to a full
+  // re-convert (changing pixelation requires re-processing the source).
+  if ((paletteChanged || metricChanged) && !algoChanged) {
+    reconvTimer = window.setTimeout(() => {
+      if (!grid.value) return
+      const pal = workingPalette.value
+      if (pal.length === 0) return
+      pushHistory()
+      const cells = [...grid.value.cells]
+      const palSet = new Set(pal.map(c => c.code))
+      for (let i = 0; i < cells.length; i++) {
+        const code = cells[i]
+        if (!code || palSet.has(code)) continue
+        const color = MARD_COLORS[code]
+        if (!color) continue
+        cells[i] = substituteFor(color, pal, matchMetric.value).code
+      }
+      grid.value = { ...grid.value, cells }
+      gridVersion.value++
+      render()
+    }, 240)
+    return
+  }
+
+  // ===== width / algo change =====
   // resample the current grid to the new width (keeps the pattern, nearest-neighbour)
   const doResample = () => {
     const g = grid.value
@@ -2014,9 +2052,8 @@ watch([gridWidth, algo, tier, matchMetric, palMode, myPaletteCodes, colorLimit],
     render()
   }
   if (sourceImg.value) {
-    // pixelfit auto-detects the size — a width-only tweak just resamples the
-    // detected grid; anything else re-converts from the source image
-    if (algo.value === 'pixelfit' && widthChanged && !otherChanged) {
+    // pixelfit auto-detects the size — a width-only tweak just resamples
+    if (algo.value === 'pixelfit' && widthChanged && !algoChanged && !paletteChanged && !metricChanged) {
       reconvTimer = window.setTimeout(doResample, 240)
     } else {
       reconvTimer = window.setTimeout(() => convert(false), 240)
