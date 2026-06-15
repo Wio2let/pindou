@@ -2014,11 +2014,22 @@ watch([gridWidth, algo, tier, matchMetric, palMode, myPaletteCodes, colorLimit],
     return
   }
 
-  // ===== palette / metric change: re-map current grid colours in-place =====
-  // Preserves manual edits & canvas dimensions — does NOT go back to the
-  // source image.  Only when algo ALSO changed do we fall through to a full
-  // re-convert (changing pixelation requires re-processing the source).
+  // ===== palette change =====
+  // When palette *expands* (more colours become available) and we have the
+  // source image, re-convert from source at the current gridWidth so every
+  // cell uses the newly available colours for a better match — the in-place
+  // remap would keep the old squashed colours (they're all in the superset).
+  // Otherwise (metric-only, palette shrinks, no source) remap in-place.
   if ((paletteChanged || metricChanged) && !algoChanged) {
+    if (paletteChanged && sourceImg.value) {
+      let oldSize = 0
+      if (ov[4] === 'tier') oldSize = MARD_TIERS[ov[2] as Tier]?.length ?? 0
+      else oldSize = (ov[5] as string[])?.length ?? 0
+      if (oldSize > 0 && workingPalette.value.length > oldSize) {
+        reconvTimer = window.setTimeout(() => convert(false), 240)
+        return
+      }
+    }
     reconvTimer = window.setTimeout(() => {
       if (!grid.value) return
       const pal = workingPalette.value
