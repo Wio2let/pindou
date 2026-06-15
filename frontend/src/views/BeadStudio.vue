@@ -1982,7 +1982,27 @@ watch([gridWidth, algo, tier, matchMetric, palMode, myPaletteCodes, colorLimit],
   const widthChanged = nv[0] !== ov[0]
   // anything other than the width — algorithm / palette / colour-limit …
   const otherChanged = nv[1] !== ov[1] || nv[2] !== ov[2] || nv[3] !== ov[3]
-                    || nv[4] !== ov[4] || nv[5] !== ov[5] || nv[6] !== ov[6]
+                    || nv[4] !== ov[4] || nv[5] !== ov[5]
+  const colorLimitChanged = nv[6] !== ov[6]
+
+  // colour-limit always operates on the current grid in-place, never re-converts
+  // from the source image (preserves any manual edits on the canvas).
+  if (colorLimitChanged) {
+    if (colorLimit.value > 0) {
+      reconvTimer = window.setTimeout(() => {
+        if (!grid.value) return
+        pushHistory()
+        limitColors(grid.value, colorLimit.value)
+        gridVersion.value++
+        render()
+      }, 240)
+    } else if (sourceImg.value) {
+      // resetting to unlimited → re-convert from source to restore full colours
+      reconvTimer = window.setTimeout(() => convert(false), 240)
+    }
+    return
+  }
+
   // resample the current grid to the new width (keeps the pattern, nearest-neighbour)
   const doResample = () => {
     const g = grid.value
@@ -2001,15 +2021,6 @@ watch([gridWidth, algo, tier, matchMetric, palMode, myPaletteCodes, colorLimit],
     } else {
       reconvTimer = window.setTimeout(() => convert(false), 240)
     }
-  } else if (nv[6] !== ov[6] && colorLimit.value > 0) {
-    // no source image → colour-limit reduces the current grid in place
-    reconvTimer = window.setTimeout(() => {
-      if (!grid.value) return
-      pushHistory()
-      limitColors(grid.value, colorLimit.value)
-      gridVersion.value++
-      render()
-    }, 240)
   } else if (widthChanged) {
     // blank / hand-drawn canvas → width change resamples the grid
     reconvTimer = window.setTimeout(doResample, 240)
